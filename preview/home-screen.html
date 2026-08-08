@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>NeonDrive — превью рабочего стола</title>
+<style>
+  :root{
+    --cyan:#00F0FF; --magenta:#FF2FD0; --violet:#8A5CFF; --lime:#B6FF3C;
+    --void:#04060C; --panel:rgba(11,18,32,.82); --hi:#EAF6FF;
+    --mid:rgba(234,246,255,.7); --low:rgba(234,246,255,.4);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#05070d;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;padding:28px;
+  }
+  .frame{
+    width:1180px;height:664px;border-radius:20px;position:relative;overflow:hidden;
+    background:
+      radial-gradient(900px 500px at 18% 10%, rgba(0,240,255,.16), transparent 60%),
+      radial-gradient(800px 460px at 92% 92%, rgba(255,47,208,.13), transparent 60%),
+      linear-gradient(160deg,#04060C 0%,#0A0F1A 55%,#0D0718 100%);
+    box-shadow:0 0 80px rgba(0,240,255,.12), 0 0 0 1px rgba(0,240,255,.14);
+    display:flex;gap:12px;padding:12px;
+  }
+  .frame::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(to bottom,rgba(0,240,255,.028) 0 1px,transparent 1px 4px);
+  }
+  .panel{
+    background:linear-gradient(180deg,rgba(11,18,32,.92),rgba(11,18,32,.66));
+    border:1px solid rgba(0,240,255,.32);border-radius:22px;position:relative;
+  }
+  .glow{box-shadow:0 0 26px rgba(0,240,255,.13), inset 0 0 40px rgba(0,240,255,.03)}
+  .hud{font:600 10px/1 ui-monospace,monospace;letter-spacing:1.7px;color:rgba(0,240,255,.8);text-transform:uppercase}
+
+  /* ── левая колонка 25 % ── */
+  .col{width:25%;display:flex;flex-direction:column;gap:12px}
+
+  .speedo{padding:16px;display:flex;flex-direction:column}
+  .speedo .top{display:flex;justify-content:space-between;align-items:center}
+  .gauge{position:relative;height:196px;display:flex;align-items:center;justify-content:center;margin-top:6px}
+  .gauge svg{position:absolute;inset:0;width:100%;height:100%}
+  .num{font-size:52px;font-weight:700;color:var(--hi);letter-spacing:-2px;line-height:1;
+    text-shadow:0 0 22px rgba(0,240,255,.35)}
+  .unit{font:500 10px/1 ui-monospace,monospace;letter-spacing:4px;color:rgba(0,240,255,.8);text-align:center;margin-top:5px}
+  .steps{display:flex;justify-content:center;gap:6px;margin-top:9px}
+  .steps i{width:5px;height:5px;border-radius:50%;background:rgba(0,240,255,.28)}
+  .steps i.on{width:8px;height:8px;background:var(--magenta);box-shadow:0 0 10px var(--magenta)}
+  .speedo .bot{display:flex;justify-content:space-between;margin-top:8px;
+    font:500 10px ui-monospace,monospace;color:var(--low)}
+  .gain{color:var(--magenta);font-weight:700}
+
+  .player{padding:16px;flex:1;display:flex;flex-direction:column;border-color:rgba(255,47,208,.32);
+    box-shadow:0 0 26px rgba(255,47,208,.12)}
+  .tabs{display:flex;gap:4px}
+  .tab{flex:1;text-align:center;font-size:10px;padding:6px 0;border-radius:9px;
+    background:rgba(12,20,36,.5);color:var(--low)}
+  .tab.on{background:rgba(255,47,208,.2);border:1px solid rgba(255,47,208,.7);color:var(--magenta);font-weight:600}
+  .track{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .art{width:70px;height:70px;border-radius:14px;flex:none;
+    background:linear-gradient(135deg,#12203a,#0b1220);border:1px solid rgba(255,47,208,.45);
+    box-shadow:0 0 22px rgba(255,47,208,.3);display:flex;align-items:center;justify-content:center;
+    font-size:26px;color:rgba(255,47,208,.7)}
+  .t-title{color:var(--hi);font-size:15px;font-weight:600;margin-top:4px}
+  .t-sub{color:var(--low);font-size:12px}
+  .spectrum{display:flex;align-items:flex-end;gap:3px;height:22px;margin-top:12px}
+  .spectrum i{flex:1;border-radius:2px;background:linear-gradient(180deg,var(--magenta),rgba(255,47,208,.25))}
+  .transport{display:flex;justify-content:space-evenly;align-items:center;margin-top:14px}
+  .rb{border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:rgba(12,20,36,.6);border:1px solid rgba(255,47,208,.32);color:var(--magenta)}
+  .rb.s{width:36px;height:36px;font-size:14px;border-color:rgba(0,240,255,.3);color:var(--cyan)}
+  .rb.m{width:42px;height:42px;font-size:16px}
+  .rb.l{width:54px;height:54px;font-size:20px;background:rgba(255,47,208,.22);
+    border-color:rgba(255,47,208,.85);box-shadow:0 0 24px rgba(255,47,208,.4)}
+  .vol{font:500 9px ui-monospace,monospace;letter-spacing:1.4px;color:var(--low);margin-top:8px}
+
+  /* ── карта ── */
+  .map{flex:1;border-radius:26px;overflow:hidden;position:relative;
+    background:radial-gradient(120% 120% at 50% 40%,#071019,#04070E);
+    border:1px solid rgba(0,240,255,.3);box-shadow:0 0 34px rgba(0,240,255,.13)}
+  .map svg{position:absolute;inset:0;width:100%;height:100%}
+  .map .bar{position:absolute;left:0;right:0;display:flex;align-items:center;padding:14px;gap:10px}
+  .map .bar.top{top:0}
+  .map .bar.bottom{bottom:0}
+  .pill{background:rgba(6,11,20,.72);border:1px solid rgba(0,240,255,.34);border-radius:14px;
+    padding:8px 13px;font-size:11px;color:var(--mid);display:flex;align-items:center;gap:7px}
+  .pill .ic{color:var(--cyan)}
+  .expand{margin-left:auto;background:rgba(255,47,208,.2);border:1px solid rgba(255,47,208,.8);
+    border-radius:16px;padding:10px 18px;color:var(--magenta);
+    font:600 11px ui-monospace,monospace;letter-spacing:1.4px;box-shadow:0 0 22px rgba(255,47,208,.32)}
+  .status{margin-left:auto;font:500 10px ui-monospace,monospace;color:rgba(0,240,255,.8)}
+
+  /* ── док ── */
+  .dock{width:96px;border-radius:26px;padding:12px 6px;display:flex;flex-direction:column;
+    align-items:center;gap:9px}
+  .clock{font-size:31px;font-weight:200;color:var(--hi);letter-spacing:-1px;display:flex;align-items:flex-end}
+  .clock small{font:500 12px ui-monospace,monospace;color:rgba(0,240,255,.85);margin-left:3px;margin-bottom:5px}
+  .date{font-size:12px;color:var(--mid)}
+  .dow{font:500 9px ui-monospace,monospace;letter-spacing:2px;color:rgba(0,240,255,.6)}
+  .sep{width:66px;height:1px;background:rgba(0,240,255,.25);margin:4px 0}
+  .tile{width:60px;height:60px;border-radius:20px;display:flex;align-items:center;justify-content:center;
+    font-size:23px;background:linear-gradient(180deg,rgba(16,26,46,.95),rgba(10,15,26,.95));
+    border:1px solid rgba(0,240,255,.28);color:var(--mid)}
+  .tile.on{border-color:rgba(0,240,255,.85);color:var(--cyan);box-shadow:0 0 22px rgba(0,240,255,.4)}
+  .cap{font-size:9px;color:var(--low);margin-top:4px}
+  .item{display:flex;flex-direction:column;align-items:center}
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <!-- 25 % колонка -->
+  <div class="col">
+    <div class="panel glow speedo">
+      <div class="top"><span class="hud">GPS</span>
+        <span style="font:500 10px ui-monospace,monospace;color:rgba(0,240,255,.8)">FIX · ±4 м</span></div>
+      <div class="gauge">
+        <svg viewBox="0 0 240 240" id="gauge">
+          <defs>
+            <radialGradient id="core"><stop offset="0%" stop-color="#0A1120"/>
+              <stop offset="100%" stop-color="#05080F"/></radialGradient>
+            <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#00F0FF"/><stop offset="55%" stop-color="#FF2FD0"/>
+              <stop offset="100%" stop-color="#FF3B5C"/>
+            </linearGradient>
+          </defs>
+          <g id="wings"></g>
+          <circle cx="120" cy="120" r="113" fill="none" stroke="rgba(0,240,255,.16)" stroke-width="3"/>
+          <g id="ticks"></g>
+          <g id="segments"></g>
+          <circle cx="120" cy="120" r="52" fill="url(#core)"/>
+          <circle cx="120" cy="120" r="52" fill="none" stroke="url(#ring)" stroke-width="2.6"/>
+          <circle id="pointer" cx="120" cy="43" r="3" fill="#fff"/>
+        </svg>
+        <div style="text-align:center;position:relative;z-index:2">
+          <div class="num">94</div>
+          <div class="unit">КМ/Ч</div>
+          <div class="steps"><i></i><i class="on"></i><i></i><i></i></div>
+        </div>
+      </div>
+      <div class="bot"><span>СПУТНИКИ 11</span><span class="gain">VOL +12%</span></div>
+    </div>
+
+    <div class="panel player">
+      <div class="tabs">
+        <div class="tab">С устройства</div>
+        <div class="tab on">Радио</div>
+        <div class="tab">Я.Музыка</div>
+      </div>
+      <div class="track">
+        <div class="art">♫</div>
+        <div>
+          <div class="hud" style="color:rgba(255,47,208,.8)">Радио</div>
+          <div class="t-title">Record Synthwave</div>
+          <div class="t-sub">Synthwave · 96 kbps</div>
+        </div>
+      </div>
+      <div class="spectrum" id="spectrum"></div>
+      <div class="transport">
+        <div class="rb s">−</div><div class="rb m">⏮</div>
+        <div class="rb l">⏸</div><div class="rb m">⏭</div><div class="rb s">+</div>
+      </div>
+      <div class="vol">ГРОМКОСТЬ 62%</div>
+    </div>
+  </div>
+
+  <!-- карта -->
+  <div class="map">
+    <svg viewBox="0 0 800 640" preserveAspectRatio="none">
+      <g stroke="rgba(0,240,255,.06)" stroke-width="1">
+        <g id="grid"></g>
+      </g>
+      <line x1="0" y1="215" x2="800" y2="192" stroke="rgba(0,240,255,.13)" stroke-width="14"/>
+      <line x1="576" y1="0" x2="512" y2="640" stroke="rgba(0,240,255,.10)" stroke-width="11"/>
+      <path d="M400 680 C400 460 240 384 264 256 C288 140 496 140 560 38"
+            fill="none" stroke="url(#route)" stroke-width="13" stroke-linecap="round"/>
+      <path d="M400 680 C400 460 240 384 264 256 C288 140 496 140 560 38"
+            fill="none" stroke="rgba(255,255,255,.28)" stroke-width="4" stroke-linecap="round"/>
+      <defs>
+        <linearGradient id="route" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#FF2FD0"/><stop offset="100%" stop-color="#00F0FF"/>
+        </linearGradient>
+        <radialGradient id="halo"><stop offset="0%" stop-color="rgba(0,240,255,.32)"/>
+          <stop offset="100%" stop-color="transparent"/></radialGradient>
+      </defs>
+      <circle cx="400" cy="500" r="78" fill="url(#halo)"/>
+      <path d="M400 480 L414 516 L400 508 L386 516 Z" fill="#00F0FF"/>
+    </svg>
+
+    <div class="bar top">
+      <div class="pill"><span class="ic">▲</span> ЯНДЕКС НАВИГАТОР</div>
+      <div class="status">КУРС 348° · 142 м</div>
+    </div>
+    <div class="bar bottom">
+      <div class="pill"><span class="ic">◎</span> Домой</div>
+      <div class="pill"><span class="ic">⌕</span> Поиск</div>
+      <div class="pill"><span style="color:#FF2FD0">⛽</span> АЗС</div>
+      <div class="expand">РАЗВЕРНУТЬ</div>
+    </div>
+  </div>
+
+  <!-- док -->
+  <div class="panel glow dock">
+    <div class="clock">14:32<small>07</small></div>
+    <div class="date">8 августа</div>
+    <div class="dow">СУББОТА</div>
+    <div class="sep"></div>
+    <div class="item"><div class="tile">📞</div><div class="cap">Телефон</div></div>
+    <div class="item"><div class="tile on">🧭</div><div class="cap" style="color:#00F0FF">Навигация</div></div>
+    <div class="item"><div class="tile">🎚</div><div class="cap">Эквалайзер</div></div>
+    <div class="item"><div class="tile">⚙</div><div class="cap">Система</div></div>
+    <div class="item"><div class="tile">▦</div><div class="cap">Приложения</div></div>
+    <div class="item"><div class="tile">⚡</div><div class="cap">Оболочка</div></div>
+  </div>
+</div>
+
+<script>
+  /* ── спидометр: крылья, риски, сегментная лесенка ── */
+  (function(){
+    const C=120, START=135, SWEEP=270, MAXV=200, SEG=44, RED=.7, SPEED=94;
+    const rad=d=>d*Math.PI/180, X=(r,a)=>C+r*Math.cos(rad(a)), Y=(r,a)=>C+r*Math.sin(rad(a));
+    const mix=(a,b,t)=>a.map((v,i)=>Math.round(v+(b[i]-v)*Math.min(1,Math.max(0,t))));
+    const CY=[0,240,255], MG=[255,47,208], RD=[255,59,92], rgb=c=>`rgb(${c[0]},${c[1]},${c[2]})`;
+
+    // крылья
+    const w=document.getElementById('wings');
+    [[-58,MG],[32,CY],[122,MG],[212,CY]].forEach(([s,col])=>{
+      const r=113, a0=s, a1=s+34;
+      w.innerHTML+=`<path d="M${X(r,a0)} ${Y(r,a0)} A ${r} ${r} 0 0 1 ${X(r,a1)} ${Y(r,a1)}"
+        fill="none" stroke="${rgb(col)}" stroke-opacity=".45" stroke-width="22"/>`;
+    });
+
+    // точки + подписи
+    const t=document.getElementById('ticks');
+    for(let v=0; v<=MAXV; v+=10){
+      const f=v/MAXV, a=START+SWEEP*f, major=v%20===0, hot=f>=RED;
+      const col = hot?RD:mix(CY,MG,f/RED);
+      t.innerHTML+=`<circle cx="${X(85,a)}" cy="${Y(85,a)}" r="${major?2.4:1.5}"
+        fill="${rgb(col)}" fill-opacity="${major?.85:.35}"/>`;
+      if(major) t.innerHTML+=`<text x="${X(98,a)}" y="${Y(98,a)+2.5}" text-anchor="middle"
+        font-family="ui-monospace,monospace" font-size="7"
+        fill="${hot?'#FF3B5C':'rgba(234,246,255,.7)'}">${v}</text>`;
+    }
+
+    // сегменты
+    const s=document.getElementById('segments'), step=SWEEP/SEG, gap=step*.28;
+    const filled=(SPEED/MAXV)*SEG;
+    for(let i=0;i<SEG;i++){
+      const f=i/(SEG-1), on=i<filled, hot=f>=RED;
+      const col = hot?mix(MG,RD,(f-RED)/(1-RED)):mix(CY,MG,f/RED);
+      const a0=START+step*i+gap/2, a1=a0+step-gap, rOut=77, rIn=on?60:65;
+      s.innerHTML+=`<path d="M${X(rIn,a0)} ${Y(rIn,a0)} L${X(rOut,a0)} ${Y(rOut,a0)}
+        L${X(rOut,a1)} ${Y(rOut,a1)} L${X(rIn,a1)} ${Y(rIn,a1)} Z"
+        fill="${rgb(col)}" fill-opacity="${on?1:.13}"/>`;
+    }
+
+    // указатель
+    const ap=START+SWEEP*(SPEED/MAXV);
+    const p=document.getElementById('pointer');
+    p.setAttribute('cx',X(84,ap)); p.setAttribute('cy',Y(84,ap));
+    s.innerHTML+=`<circle cx="${X(84,ap)}" cy="${Y(84,ap)}" r="18"
+      fill="${rgb(MG)}" fill-opacity=".22"/>`;
+  })();
+
+  // сетка кварталов
+  const g = document.getElementById('grid');
+  for (let x = 0; x <= 800; x += 64) g.innerHTML += `<line x1="${x}" y1="0" x2="${x}" y2="640"/>`;
+  for (let y = 0; y <= 640; y += 64) g.innerHTML += `<line x1="0" y1="${y}" x2="800" y2="${y}"/>`;
+
+  // живая гребёнка спектра
+  const sp = document.getElementById('spectrum');
+  for (let i = 0; i < 34; i++) sp.appendChild(document.createElement('i'));
+  const bars = sp.querySelectorAll('i');
+  let t = 0;
+  setInterval(() => {
+    t += 0.22;
+    bars.forEach((b, i) => {
+      const k = (Math.sin(t + i * 0.5) * 0.5 + 0.5) * (Math.sin(t * 0.7 + i * 0.21) * 0.4 + 0.6);
+      b.style.height = (15 + 85 * k) + '%';
+    });
+  }, 60);
+</script>
+</body>
+</html>

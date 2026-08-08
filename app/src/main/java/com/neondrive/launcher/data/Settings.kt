@@ -1,0 +1,141 @@
+package com.neondrive.launcher.data
+
+/* ─────────────────  МОДЕЛИ НАСТРОЕК  ───────────────── */
+
+/** Что делать с музыкой, когда с подключённого телефона приходит уведомление. */
+enum class NotificationReaction(val label: String, val hint: String) {
+    IGNORE("Нет", "Играть дальше без изменений"),
+    DUCK("Приглушать", "Временно снизить громкость на время уведомления"),
+    PAUSE("Да, ставить на паузу", "Полная пауза, затем автоматическое возобновление");
+}
+
+enum class MusicSource(val label: String) {
+    DEVICE("С устройства"),
+    RADIO("Радио"),
+    YANDEX("Яндекс.Музыка")
+}
+
+enum class SidebarSide { LEFT, RIGHT }
+
+enum class SpeedUnits(val label: String, val factorFromMs: Float) {
+    KMH("км/ч", 3.6f),
+    MPH("mph", 2.2369363f)
+}
+
+/**
+ * Один уровень схемы «громкость от скорости».
+ * [fromKmh] — с какой скорости уровень активен, [gain] — прибавка в процентах
+ * от базовой громкости (0..100).
+ */
+data class SpeedVolumeStep(val fromKmh: Int, val gain: Int)
+
+/** Действия, которые можно назначить на кнопку руля. */
+enum class SwcAction(val label: String) {
+    NONE("— не назначено —"),
+    PLAY_PAUSE("Плей / Пауза"),
+    NEXT("Следующий трек"),
+    PREV("Предыдущий трек"),
+    VOL_UP("Громче"),
+    VOL_DOWN("Тише"),
+    MUTE("Мьют"),
+    SOURCE_NEXT("Смена источника"),
+    ANSWER_CALL("Принять вызов"),
+    END_CALL("Сбросить вызов"),
+    VOICE("Голосовой помощник"),
+    HOME("На главный экран"),
+    NAVIGATION("Открыть навигацию"),
+    APPS("Все приложения")
+}
+
+/** Заводские значения, вынесены наружу, чтобы не ловить циклы в конструкторе. */
+object Defaults {
+    val speedSteps = listOf(
+        SpeedVolumeStep(0, 0),
+        SpeedVolumeStep(60, 6),
+        SpeedVolumeStep(90, 12),
+        SpeedVolumeStep(120, 20)
+    )
+
+    val swcShort: Map<Int, SwcAction> = mapOf(
+        android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE to SwcAction.PLAY_PAUSE,
+        android.view.KeyEvent.KEYCODE_MEDIA_NEXT to SwcAction.NEXT,
+        android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS to SwcAction.PREV,
+        android.view.KeyEvent.KEYCODE_VOLUME_UP to SwcAction.VOL_UP,
+        android.view.KeyEvent.KEYCODE_VOLUME_DOWN to SwcAction.VOL_DOWN,
+        android.view.KeyEvent.KEYCODE_CALL to SwcAction.ANSWER_CALL,
+        android.view.KeyEvent.KEYCODE_ENDCALL to SwcAction.END_CALL,
+        android.view.KeyEvent.KEYCODE_VOICE_ASSIST to SwcAction.VOICE
+    )
+}
+
+/** Полный снимок конфигурации оболочки. */
+data class LauncherSettings(
+    /* Внешний вид */
+    val accent: String = "CYAN",
+    val sidebarSide: SidebarSide = SidebarSide.RIGHT,
+    val animatedBackground: Boolean = true,
+    val show24h: Boolean = true,
+    val units: SpeedUnits = SpeedUnits.KMH,
+    val mapPackage: String = "ru.yandex.yandexnavi",
+
+    /* Навигация */
+    /** Открывать навигатор в окне по границам панели карты (нужен freeform). */
+    val navWindowed: Boolean = false,
+    /** Сохранённая точка «Дом»; NaN — не задана. */
+    val homeLat: Double = Double.NaN,
+    val homeLon: Double = Double.NaN,
+
+    /* 1. Автопроигрывание музыки */
+    val autoplay: Boolean = true,
+    val autoplayDelaySec: Int = 3,
+    val autoplaySource: MusicSource = MusicSource.DEVICE,
+
+    /* 2. Реакция на уведомления с подключённого девайса */
+    val notificationReaction: NotificationReaction = NotificationReaction.DUCK,
+    /** Насколько приглушать, % от текущей громкости (режим DUCK). */
+    val duckPercent: Int = 35,
+    /** Сколько держать приглушение после уведомления, мс. */
+    val duckHoldMs: Int = 2500,
+    /** Реагировать только на уведомления Bluetooth-телефона, а не всей системы. */
+    val onlyPairedDeviceNotifications: Boolean = true,
+
+    /* 3. Громкость от скорости */
+    val speedVolumeEnabled: Boolean = true,
+    val speedSteps: List<SpeedVolumeStep> = Defaults.speedSteps,
+    /** Насколько плавно подтягивать громкость, мс на шаг. */
+    val speedVolumeSmoothMs: Int = 1200,
+
+    /* 4. Возврат музыки после телефонного вызова */
+    val resumeAfterCall: Boolean = true,
+    val resumeAfterCallDelaySec: Int = 2,
+
+    /* Кнопки руля */
+    val swcEnabled: Boolean = true,
+    val swcLongPressMs: Int = 600,
+    /** keyCode -> действие (короткое нажатие). */
+    val swcShort: Map<Int, SwcAction> = Defaults.swcShort,
+    /** keyCode -> действие (долгое нажатие). */
+    val swcLong: Map<Int, SwcAction> = emptyMap(),
+    /** Резистивные кнопки читаются напрямую из ADC-ноды ядра. */
+    val swcAdcEnabled: Boolean = false,
+    val swcAdcPath: String = "/sys/class/adc_key/value",
+    /** Разброс АЦП, в пределах которого значение считается той же кнопкой. */
+    val swcAdcTolerance: Int = 25,
+    /** ADC-значение -> действие. */
+    val swcAdcMap: Map<Int, SwcAction> = emptyMap(),
+
+    /* Прочее */
+    val startOnBoot: Boolean = true,
+    val keepScreenOn: Boolean = true
+) {
+    val hasHomePoint: Boolean get() = !homeLat.isNaN() && !homeLon.isNaN()
+
+    /** Прибавка громкости в % для текущей скорости. */
+    fun gainForSpeed(kmh: Float): Int {
+        if (!speedVolumeEnabled) return 0
+        return speedSteps
+            .sortedBy { it.fromKmh }
+            .lastOrNull { kmh >= it.fromKmh }
+            ?.gain ?: 0
+    }
+}
