@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.neondrive.launcher.media.RadioStation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -28,6 +29,7 @@ class SettingsRepository(private val context: Context) {
         val show24h = booleanPreferencesKey("show_24h")
         val units = stringPreferencesKey("units")
         val mapPackage = stringPreferencesKey("map_package")
+        val customStations = stringPreferencesKey("custom_stations")
         val mapMode = stringPreferencesKey("map_mode")
         val mapAutoStart = booleanPreferencesKey("map_auto_start")
         val mapAutoStartDelay = intPreferencesKey("map_auto_start_delay")
@@ -75,6 +77,7 @@ class SettingsRepository(private val context: Context) {
             show24h = p[K.show24h] ?: d.show24h,
             units = p[K.units]?.let { runCatching { SpeedUnits.valueOf(it) }.getOrNull() } ?: d.units,
             mapPackage = p[K.mapPackage] ?: d.mapPackage,
+            customStations = p[K.customStations]?.let(::decodeStations) ?: d.customStations,
             mapMode = p[K.mapMode]?.let { runCatching { MapMode.valueOf(it) }.getOrNull() }
                 ?: d.mapMode,
             mapAutoStart = p[K.mapAutoStart] ?: d.mapAutoStart,
@@ -126,6 +129,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShow24h(v: Boolean) = put { it[K.show24h] = v }
     suspend fun setUnits(v: SpeedUnits) = put { it[K.units] = v.name }
     suspend fun setMapPackage(v: String) = put { it[K.mapPackage] = v }
+    suspend fun setCustomStations(v: List<RadioStation>) = put { it[K.customStations] = encodeStations(v) }
     suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
     suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }
     suspend fun setMapAutoStartDelay(sec: Int) = put {
@@ -176,6 +180,25 @@ class SettingsRepository(private val context: Context) {
     }
 
     /* ─────────  Кодирование карт  ───────── */
+
+    // Составные ASCII-метки вместо "|"/":" — те изредка встречаются внутри самих
+    // ссылок на поток или названий станций, а такое сочетание символов — никогда.
+    private fun encodeStations(v: List<RadioStation>) = v.filterNot { it.builtIn }
+        .joinToString("###REC###") {
+            listOf(it.id, it.name, it.streamUrl, it.genre).joinToString("###FLD###")
+        }
+
+    private fun decodeStations(s: String): List<RadioStation> {
+        if (s.isBlank()) return emptyList()
+        return s.split("###REC###").mapNotNull { rec ->
+            val f = rec.split("###FLD###")
+            if (f.size < 3 || f[0].isBlank() || f[2].isBlank()) return@mapNotNull null
+            RadioStation(
+                id = f[0], name = f[1], streamUrl = f[2],
+                genre = f.getOrElse(3) { "" }, builtIn = false
+            )
+        }
+    }
 
     private fun encodeSteps(v: List<SpeedVolumeStep>) =
         v.joinToString("|") { "${it.fromKmh}:${it.gain}" }

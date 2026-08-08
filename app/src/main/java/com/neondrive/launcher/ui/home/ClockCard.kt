@@ -1,9 +1,7 @@
 package com.neondrive.launcher.ui.home
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,30 +41,19 @@ fun ClockCard(
 
     val ru = remember { Locale("ru", "RU") }
     val timeFmt = remember(use24h) { SimpleDateFormat(if (use24h) "HH:mm" else "h:mm", ru) }
-    val secFmt = remember { SimpleDateFormat("ss", ru) }
     val dateFmt = remember { SimpleDateFormat("d MMMM", ru) }
     val dowFmt = remember { SimpleDateFormat("EEEE", ru) }
     val date = Date(nowMs)
 
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = timeFmt.format(date),
-                color = Neon.TextHi,
-                fontSize = if (compact) 32.sp else 64.sp,
-                fontWeight = FontWeight.Light,
-                fontFamily = FontFamily.SansSerif,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = secFmt.format(date),
-                color = accent.copy(alpha = 0.85f),
-                fontSize = if (compact) 12.sp else 22.sp,
-                fontWeight = FontWeight.Medium,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 3.dp, bottom = if (compact) 5.dp else 11.dp)
-            )
-        }
+        Text(
+            text = timeFmt.format(date),
+            color = Neon.TextHi,
+            fontSize = if (compact) 32.sp else 64.sp,
+            fontWeight = FontWeight.Light,
+            fontFamily = FontFamily.SansSerif,
+            letterSpacing = (-1).sp
+        )
         Text(
             text = dateFmt.format(date).lowercase(ru),
             color = Neon.TextMid,

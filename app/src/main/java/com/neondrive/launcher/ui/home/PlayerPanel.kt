@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,8 +28,6 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.VolumeDown
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,166 +76,170 @@ fun PlayerPanel(
     onOpenLibrary: () -> Unit
 ) {
     NeonCard(modifier = modifier, accent = accent2) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            // Панель живёт в колонке произвольной ширины — от компактных ГУ 7"
+            // до широких приборных экранов. Подстраиваем размеры, чтобы контролы
+            // не наезжали друг на друга и не обрезались на узких экранах.
+            val narrow = maxWidth < 230.dp
+            val coverSize = if (narrow) 54.dp else 72.dp
+            val titleSize = if (narrow) 13.sp else 15.sp
+            val subtitleSize = if (narrow) 11.sp else 12.sp
+            val likeSize = if (narrow) 34.dp else 40.dp
+            val transportSize = if (narrow) 38.dp else 44.dp
+            val playSize = if (narrow) 48.dp else 56.dp
 
-        // Переключатель источника
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            MusicSource.entries.forEach { s ->
-                val sel = s == source
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (sel) accent2.copy(alpha = 0.20f) else Color(0x330C1424))
-                        .border(
-                            1.dp,
-                            if (sel) accent2.copy(alpha = 0.7f) else Color.Transparent,
-                            RoundedCornerShape(9.dp)
-                        )
-                        .clickable { onSource(s) }
-                        .padding(vertical = 6.dp),
-                    contentAlignment = Alignment.Center
+            Column(Modifier.fillMaxWidth()) {
+
+                // Переключатель источника
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        s.label,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (sel) accent2 else Neon.TextLow,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
-                    )
+                    MusicSource.entries.forEach { s ->
+                        val sel = s == source
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (sel) accent2.copy(alpha = 0.20f) else Color(0x330C1424))
+                                .border(
+                                    1.dp,
+                                    if (sel) accent2.copy(alpha = 0.7f) else Color.Transparent,
+                                    RoundedCornerShape(9.dp)
+                                )
+                                .clickable { onSource(s) }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                s.label,
+                                fontSize = if (narrow) 9.sp else 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = if (sel) accent2 else Neon.TextLow,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
                 }
-            }
-        }
 
-        Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Обложка
-            Box(
-                Modifier
-                    .size(72.dp)
-                    .neonGlow(accent2, 14.dp, if (now.isPlaying) 0.35f else 0.12f, 10.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF0C1424))
-                    .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                    .clickable { onOpenLibrary() },
-                contentAlignment = Alignment.Center
-            ) {
-                if (now.artUri != null) {
-                    AsyncImage(
-                        model = now.artUri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(72.dp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Обложка
+                    Box(
+                        Modifier
+                            .size(coverSize)
+                            .neonGlow(accent2, 14.dp, if (now.isPlaying) 0.35f else 0.12f, 10.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF0C1424))
+                            .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .clickable { onOpenLibrary() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (now.artUri != null) {
+                            AsyncImage(
+                                model = now.artUri,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.size(coverSize)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.LibraryMusic, null,
+                                tint = accent2.copy(alpha = 0.55f),
+                                modifier = Modifier.size(coverSize * 0.42f)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.padding(horizontal = 6.dp))
+
+                    Column(Modifier.weight(1f)) {
+                        HudLabel(
+                            if (connecting) "Подключение…" else now.sourceLabel.ifBlank { source.label },
+                            accent2
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            now.title,
+                            color = Neon.TextHi,
+                            fontSize = titleSize,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            now.subtitle,
+                            color = Neon.TextLow,
+                            fontSize = subtitleSize,
+                            maxLines = if (narrow) 1 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 14.sp
+                        )
+                    }
+
+                    // Лайк доступен, когда его поддерживает сессия стороннего приложения
+                    if (canLike) {
+                        Box(
+                            Modifier
+                                .size(likeSize)
+                                .then(
+                                    if (liked == true) Modifier.neonGlow(Neon.Magenta, likeSize / 2, 0.4f, 8.dp)
+                                    else Modifier
+                                )
+                                .clip(RoundedCornerShape(likeSize / 2))
+                                .background(
+                                    if (liked == true) Neon.Magenta.copy(alpha = 0.2f) else Color(0x550C1424)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (liked == true) Neon.Magenta.copy(alpha = 0.85f)
+                                    else Neon.TextLow.copy(alpha = 0.35f),
+                                    RoundedCornerShape(likeSize / 2)
+                                )
+                                .clickable(onClick = onLike),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                "Нравится",
+                                tint = if (liked == true) Neon.Magenta else Neon.TextMid,
+                                modifier = Modifier.size(likeSize * 0.5f)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // Эквалайзерная «полоска» вместо скучного прогресс-бара, когда играет радио
+                if (now.durationMs > 0) {
+                    ProgressLine(
+                        fraction = (now.positionMs.toFloat() / now.durationMs).coerceIn(0f, 1f),
+                        accent = accent2
                     )
                 } else {
-                    Icon(
-                        Icons.Rounded.LibraryMusic, null,
-                        tint = accent2.copy(alpha = 0.55f),
-                        modifier = Modifier.size(30.dp)
-                    )
+                    SpectrumLine(active = now.isPlaying, accent = accent2)
                 }
-            }
 
-            Spacer(Modifier.padding(horizontal = 6.dp))
+                Spacer(Modifier.height(10.dp))
 
-            Column(Modifier.weight(1f)) {
-                HudLabel(
-                    if (connecting) "Подключение…" else now.sourceLabel.ifBlank { source.label },
-                    accent2
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    now.title,
-                    color = Neon.TextHi,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    now.subtitle,
-                    color = Neon.TextLow,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 14.sp
-                )
-            }
-
-            // Лайк доступен, когда его поддерживает сессия стороннего приложения
-            if (canLike) {
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .then(
-                            if (liked == true) Modifier.neonGlow(Neon.Magenta, 20.dp, 0.4f, 8.dp)
-                            else Modifier
-                        )
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            if (liked == true) Neon.Magenta.copy(alpha = 0.2f) else Color(0x550C1424)
-                        )
-                        .border(
-                            1.dp,
-                            if (liked == true) Neon.Magenta.copy(alpha = 0.85f)
-                            else Neon.TextLow.copy(alpha = 0.35f),
-                            RoundedCornerShape(20.dp)
-                        )
-                        .clickable(onClick = onLike),
-                    contentAlignment = Alignment.Center
+                // Громкость регулируется физическими кнопками магнитолы — здесь только транспорт
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        "Нравится",
-                        tint = if (liked == true) Neon.Magenta else Neon.TextMid,
-                        modifier = Modifier.size(20.dp)
+                    RoundBtn(Icons.Rounded.SkipPrevious, accent2, transportSize, onClick = onPrev)
+                    RoundBtn(
+                        if (now.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        accent2, playSize, filled = true, onClick = onPlayPause
                     )
+                    RoundBtn(Icons.Rounded.SkipNext, accent2, transportSize, onClick = onNext)
                 }
             }
         }
-
-        Spacer(Modifier.height(10.dp))
-
-        // Эквалайзерная «полоска» вместо скучного прогресс-бара, когда играет радио
-        if (now.durationMs > 0) {
-            ProgressLine(
-                fraction = (now.positionMs.toFloat() / now.durationMs).coerceIn(0f, 1f),
-                accent = accent2
-            )
-        } else {
-            SpectrumLine(active = now.isPlaying, accent = accent2)
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RoundBtn(Icons.Rounded.VolumeDown, accent, 38.dp) { onVolume(false) }
-            RoundBtn(Icons.Rounded.SkipPrevious, accent2, 44.dp, onClick = onPrev)
-            RoundBtn(
-                if (now.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                accent2, 56.dp, filled = true, onClick = onPlayPause
-            )
-            RoundBtn(Icons.Rounded.SkipNext, accent2, 44.dp, onClick = onNext)
-            RoundBtn(Icons.Rounded.VolumeUp, accent, 38.dp) { onVolume(true) }
-        }
-
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "ГРОМКОСТЬ $volumePercent%",
-            fontSize = 9.sp,
-            letterSpacing = 1.5.sp,
-            fontFamily = FontFamily.Monospace,
-            color = Neon.TextLow,
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 

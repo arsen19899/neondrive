@@ -14,14 +14,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.media.PlayerHub
+import com.neondrive.launcher.media.RadioBrowserApi
 import com.neondrive.launcher.ui.common.NeonSegmented
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
 import com.neondrive.launcher.ui.theme.Neon
@@ -113,26 +126,55 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                 }
             }
 
-            MusicSource.RADIO -> LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                itemsIndexed(stations, key = { _, s -> s.id }) { _, st ->
-                    MediaRow(
-                        title = st.name,
-                        subtitle = st.genre,
-                        meta = if (st.builtIn) "PRESET" else "СВОЯ",
-                        active = now.title == st.name && source == MusicSource.RADIO,
-                        accent = accent,
-                        accent2 = accent2,
-                        icon = Icons.Rounded.Radio
-                    ) { PlayerHub.playStation(st) }
+            MusicSource.RADIO -> {
+                var radioTab by remember { mutableStateOf(0) }
+                Column(Modifier.fillMaxSize()) {
+                    NeonSegmented(
+                        options = listOf(0, 1),
+                        selected = radioTab,
+                        label = { if (it == 0) "Сохранённые" else "Поиск станций" },
+                        accent = accent2,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { radioTab = it }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    if (radioTab == 0) {
+                        LazyColumn(
+                            Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            itemsIndexed(stations, key = { _, s -> s.id }) { _, st ->
+                                MediaRow(
+                                    title = st.name,
+                                    subtitle = st.genre,
+                                    meta = if (st.builtIn) "PRESET" else "СВОЯ",
+                                    active = now.title == st.name && source == MusicSource.RADIO,
+                                    accent = accent,
+                                    accent2 = accent2,
+                                    icon = Icons.Rounded.Radio,
+                                    onRemove = if (!st.builtIn) {
+                                        { PlayerHub.removeStation(st.id) }
+                                    } else null
+                                ) { PlayerHub.playStation(st) }
+                            }
+                            if (stations.isEmpty()) {
+                                item { EmptyHint("Станций нет. Найдите и сохраните их во вкладке «Поиск станций».") }
+                            }
+                        }
+                    } else {
+                        RadioSearchTab(accent, accent2)
+                    }
                 }
             }
 
             MusicSource.YANDEX -> Column(Modifier.fillMaxSize()) {
                 val available by PlayerHub.external.available.collectAsState()
+                val hasAccess = PlayerHub.external.hasAccess()
+                val connecting by PlayerHub.connectingYandex.collectAsState()
+                val liked by PlayerHub.external.liked.collectAsState()
+                val canLike by PlayerHub.external.canLike.collectAsState()
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -142,23 +184,86 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                         .padding(20.dp)
                 ) {
                     Column {
-                        Text(
-                            if (available) "Яндекс.Музыка подключена"
-                            else "Яндекс.Музыка не активна",
-                            color = if (available) accent2 else Neon.TextMid,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    when {
+                                        connecting -> "Подключение…"
+                                        available -> "Яндекс.Музыка подключена"
+                                        else -> "Яндекс.Музыка не активна"
+                                    },
+                                    color = if (available) accent2 else Neon.TextMid,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (available) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        listOf(now.title, now.subtitle).filter { it.isNotBlank() }
+                                            .joinToString(" · "),
+                                        color = Neon.TextLow,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (canLike) {
+                                Box(
+                                    Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(19.dp))
+                                        .background(
+                                            if (liked == true) Neon.Magenta.copy(alpha = 0.2f)
+                                            else Color(0x550C1424)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (liked == true) Neon.Magenta.copy(alpha = 0.85f)
+                                            else Neon.TextLow.copy(alpha = 0.35f),
+                                            RoundedCornerShape(19.dp)
+                                        )
+                                        .clickable { PlayerHub.toggleLike() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        "Нравится",
+                                        tint = if (liked == true) Neon.Magenta else Neon.TextMid,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Оболочка управляет приложением через медиасессию: плей, пауза, " +
-                                "переключение треков и кнопки руля работают, не выходя с рабочего стола. " +
-                                "Нужно разрешение «Доступ к уведомлениям» — оно же используется для " +
-                                "реакции на уведомления телефона.",
+                                "переключение треков, лайк и кнопки руля работают, не выходя с рабочего " +
+                                "стола. Нужно разрешение «Доступ к уведомлениям» — оно же используется " +
+                                "для реакции на уведомления телефона.",
                             color = Neon.TextLow,
                             fontSize = 13.sp,
                             lineHeight = 18.sp
                         )
+                        if (!hasAccess) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Доступ к уведомлениям не выдан — без него плеер не увидит Яндекс.Музыку, " +
+                                    "даже если приложение запущено и играет.",
+                                color = Neon.Amber,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                        } else if (!available && !connecting) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Доступ есть, но сессия не найдена. Нажмите «Подключиться и играть» — " +
+                                    "приложение откроется и включит воспроизведение.",
+                                color = Neon.TextLow,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ActionChip("Подключиться и играть", accent2) {
@@ -167,7 +272,7 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                             ActionChip("Открыть приложение", accent) {
                                 PlayerHub.openYandexMusic()
                             }
-                            if (!PlayerHub.external.hasAccess()) {
+                            if (!hasAccess) {
                                 ActionChip("Выдать доступ", Neon.Red) {
                                     runCatching {
                                         context.startActivity(
@@ -198,6 +303,7 @@ private fun MediaRow(
     accent: Color,
     accent2: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onRemove: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Row(
@@ -235,6 +341,135 @@ private fun MediaRow(
             }
         }
         Text(meta, color = Neon.TextLow, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        if (onRemove != null) {
+            Spacer(Modifier.size(10.dp))
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Neon.Red.copy(alpha = 0.14f))
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Close, "Удалить", tint = Neon.Red, modifier = Modifier.size(15.dp))
+            }
+        }
+    }
+}
+
+/** Поиск радиостанций в открытом каталоге radio-browser.info и сохранение найденного. */
+@Composable
+private fun RadioSearchTab(accent: Color, accent2: Color) {
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    val results by PlayerHub.stationSearch.collectAsState()
+    val searching by PlayerHub.searching.collectAsState()
+    val stations by PlayerHub.stations.collectAsState()
+
+    fun runSearch() {
+        val q = query
+        scope.launch { PlayerHub.searchStations(q) }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x660C1424))
+                    .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Search, null,
+                        tint = accent.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (query.isEmpty()) {
+                            Text("Название станции, жанр, город…", color = Neon.TextLow, fontSize = 14.sp)
+                        }
+                        BasicTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Neon.TextHi, fontSize = 14.sp),
+                            cursorBrush = SolidColor(accent),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onSearch = { runSearch() },
+                                onDone = { runSearch() }
+                            ),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            ActionChip("Найти", accent2) { runSearch() }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        when {
+            searching -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = accent2)
+            }
+            results.isEmpty() && query.isNotBlank() -> EmptyHint("Ничего не найдено. Проверьте название или интернет-соединение.")
+            results.isEmpty() -> EmptyHint("Введите название радиостанции и нажмите «Найти».")
+            else -> LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(results, key = { it.streamUrl }) { r ->
+                    val saved = stations.any { it.streamUrl == r.streamUrl }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x330C1424))
+                            .clickable { PlayerHub.saveAndPlayStation(r) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Radio, null, tint = accent.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.size(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                r.name, color = Neon.TextHi, fontSize = 15.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                listOf(r.genre, r.country).filter { it.isNotBlank() }.joinToString(" · "),
+                                color = Neon.TextLow, fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background((if (saved) accent2 else accent).copy(alpha = 0.16f))
+                                .clickable(enabled = !saved) { PlayerHub.saveStation(r) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (saved) Icons.Rounded.Check else Icons.Rounded.Add,
+                                if (saved) "Сохранено" else "Сохранить",
+                                tint = if (saved) accent2 else accent,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

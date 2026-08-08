@@ -1,5 +1,7 @@
 package com.neondrive.launcher.data
 
+import com.neondrive.launcher.media.RadioStation
+
 /* ─────────────────  МОДЕЛИ НАСТРОЕК  ───────────────── */
 
 /** Что делать с музыкой, когда с подключённого телефона приходит уведомление. */
@@ -106,11 +108,14 @@ data class LauncherSettings(
     val units: SpeedUnits = SpeedUnits.KMH,
     val mapPackage: String = "ru.yandex.yandexnavi",
 
+    /* Радиостанции, сохранённые пользователем поиском (см. вкладку «Поиск» в Музыке) */
+    val customStations: List<RadioStation> = emptyList(),
+
     /* Навигация */
     /** Режим показа навигационного приложения на рабочем столе. */
-    val mapMode: MapMode = MapMode.OFF,
+    val mapMode: MapMode = MapMode.FRAME,
     /** Поднимать навигацию автоматически при запуске оболочки. */
-    val mapAutoStart: Boolean = false,
+    val mapAutoStart: Boolean = true,
     /** Пауза перед автозапуском навигации, чтобы система успела подняться, с. */
     val mapAutoStartDelaySec: Int = 4,
     /** Сохранённая точка «Дом»; NaN — не задана. */

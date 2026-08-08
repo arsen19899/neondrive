@@ -413,11 +413,23 @@ private fun IconAction(
     }
 }
 
+/**
+ * Звонок уходит напрямую (ACTION_CALL), минуя экран набора номера системного
+ * «Телефона» — раньше ACTION_DIAL просто подставлял цифры и ждал, пока пользователь
+ * ткнёт в чужом интерфейсе. Экран самого разговора всё равно рисует системный
+ * Telecom (это епархия приложения по умолчанию), но переход в чужой UI для набора
+ * больше не происходит. Без разрешения CALL_PHONE откатываемся на старое поведение,
+ * чтобы не упасть с SecurityException.
+ */
 private fun dial(context: Context, number: String) {
     if (number.isBlank()) return
+    val canCallDirectly = androidx.core.content.ContextCompat.checkSelfPermission(
+        context, android.Manifest.permission.CALL_PHONE
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    val action = if (canCallDirectly) Intent.ACTION_CALL else Intent.ACTION_DIAL
     runCatching {
         context.startActivity(
-            Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}"))
+            Intent(action, Uri.parse("tel:${Uri.encode(number)}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }

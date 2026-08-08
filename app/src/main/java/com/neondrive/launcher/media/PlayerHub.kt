@@ -11,12 +11,14 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.neondrive.launcher.data.MusicSource
+import com.neondrive.launcher.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -34,6 +36,13 @@ object PlayerHub {
     private var controller: MediaController? = null
     lateinit var external: ExternalSessionBridge
         private set
+    private lateinit var settingsRepo: SettingsRepository
+
+    private val _stationSearch = MutableStateFlow<List<RadioBrowserApi.Result>>(emptyList())
+    val stationSearch: StateFlow<List<RadioBrowserApi.Result>> = _stationSearch
+
+    private val _searching = MutableStateFlow(false)
+    val searching: StateFlow<Boolean> = _searching
 
     private val _source = MutableStateFlow(MusicSource.DEVICE)
     val source: StateFlow<MusicSource> = _source
@@ -59,6 +68,14 @@ object PlayerHub {
         if (::appContext.isInitialized) return
         appContext = context.applicationContext
         external = ExternalSessionBridge(appContext)
+        settingsRepo = SettingsRepository(appContext)
+
+        // Станции, сохранённые пользователем через поиск, подмешиваем к пресетам
+        scope.launch {
+            val custom = runCatching { settingsRepo.settings.first().customStations }
+                .getOrDefault(emptyList())
+            if (custom.isNotEmpty()) _stations.value = RadioPresets.default + custom
+        }
 
         val token = SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
         val future = MediaController.Builder(appContext, token).buildAsync()
@@ -130,11 +147,70 @@ object PlayerHub {
     }
 
     fun addStation(station: RadioStation) {
+        if (_stations.value.any { it.id == station.id }) return
         _stations.value = _stations.value + station
+        persistCustomStations()
     }
 
     fun removeStation(id: String) {
         _stations.value = _stations.value.filterNot { it.id == id && !it.builtIn }
+        persistCustomStations()
+    }
+
+    private fun persistCustomStations() {
+        val custom = _stations.value.filterNot { it.builtIn }
+        scope.launch { runCatching { settingsRepo.setCustomStations(custom) } }
+    }
+
+    /** Поиск станций в публичном каталоге radio-browser.info (см. [RadioBrowserApi]). */
+    fun searchStations(query: String) {
+        if (query.isBlank()) {
+            _stationSearch.value = emptyList()
+            return
+        }
+        scope.launch {
+            _searching.value = true
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    runCatching { RadioBrowserApi.search(query) }.getOrDefault(emptyList())
+                }
+                _stationSearch.value = results
+            } finally {
+                _searching.value = false
+            }
+        }
+    }
+
+    fun clearStationSearch() {
+        _stationSearch.value = emptyList()
+    }
+
+    fun isStationSaved(streamUrl: String): Boolean =
+        _stations.value.any { it.streamUrl == streamUrl }
+
+    /** Сохранить найденную станцию в список и сразу включить её. */
+    fun saveAndPlayStation(result: RadioBrowserApi.Result) {
+        val station = RadioStation(
+            id = "custom_" + result.streamUrl.hashCode(),
+            name = result.name,
+            streamUrl = result.streamUrl,
+            genre = result.genre,
+            builtIn = false
+        )
+        addStation(station)
+        playStation(station)
+    }
+
+    fun saveStation(result: RadioBrowserApi.Result) {
+        addStation(
+            RadioStation(
+                id = "custom_" + result.streamUrl.hashCode(),
+                name = result.name,
+                streamUrl = result.streamUrl,
+                genre = result.genre,
+                builtIn = false
+            )
+        )
     }
 
     /* ─────────────────  ВОСПРОИЗВЕДЕНИЕ  ───────────────── */
