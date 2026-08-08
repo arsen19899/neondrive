@@ -4,6 +4,7 @@
     <string name="notif_listener_label">NeonDrive — реакция на уведомления</string>
     <string name="channel_playback">Воспроизведение</string>
     <string name="channel_automation">Автоматика NeonDrive</string>
+    <string name="channel_overlay">Панели поверх карты</string>
 
     <string name="nav_phone">Телефон</string>
     <string name="nav_navigation">Навигация</string>

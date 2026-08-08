@@ -71,7 +71,14 @@ object PlayerHub {
 
         external.start()
         scope.launch {
-            external.now.collect { if (_source.value == MusicSource.YANDEX) _now.value = it }
+            external.now.collect {
+                if (_source.value == MusicSource.YANDEX &&
+                    !_connectingYandex.value &&
+                    external.available.value
+                ) {
+                    _now.value = it
+                }
+            }
         }
         scope.launch { tick() }
     }
@@ -86,7 +93,15 @@ object PlayerHub {
     private suspend fun tick() {
         while (true) {
             delay(500)
-            if (_source.value == MusicSource.YANDEX) external.refresh() else pushNow()
+            if (_source.value == MusicSource.YANDEX) {
+                external.refresh()
+                // Пока идёт подключение, в _now лежит служебное сообщение — не затираем
+                if (!_connectingYandex.value && external.available.value) {
+                    _now.value = external.now.value
+                }
+            } else {
+                pushNow()
+            }
         }
     }
 
@@ -167,18 +182,61 @@ object PlayerHub {
         pushNow()
     }
 
-    fun switchToYandex(launchApp: Boolean = false) {
+    /** Идёт ли сейчас подключение к Яндекс.Музыке — UI показывает это состояние. */
+    private val _connectingYandex = MutableStateFlow(false)
+    val connectingYandex: StateFlow<Boolean> = _connectingYandex
+
+    /**
+     * Переключиться на Яндекс.Музыку.
+     *
+     * Приложение может быть ещё не запущено, поэтому поднимаем его и терпеливо ждём
+     * появления медиасессии — иначе команда play уходит в пустоту и выглядит так,
+     * будто плеер сломан.
+     */
+    fun switchToYandex(launchApp: Boolean = true, autoPlay: Boolean = true) {
         _source.value = MusicSource.YANDEX
-        external.refresh()
-        _now.value = external.now.value
-        if (launchApp && !external.isYandexRunning()) openYandexMusic()
+        _now.value = external.now.value.copy(sourceLabel = "Яндекс.Музыка")
+
+        // Свой плеер уступает место
+        runCatching { controller?.pause() }
+
+        scope.launch {
+            if (!external.hasAccess()) {
+                _now.value = _now.value.copy(
+                    title = "Нужен доступ к уведомлениям",
+                    subtitle = "Настройки оболочки → Система → Доступ к уведомлениям"
+                )
+                return@launch
+            }
+            _connectingYandex.value = true
+            try {
+                val connected = if (launchApp) external.connect() else {
+                    external.refresh(); external.available.value
+                }
+                if (connected) {
+                    if (autoPlay && !external.now.value.isPlaying) {
+                        delay(600)
+                        external.play()
+                    }
+                } else {
+                    _now.value = _now.value.copy(
+                        title = "Яндекс.Музыка не отвечает",
+                        subtitle = "Откройте приложение и включите любой трек"
+                    )
+                }
+            } finally {
+                _connectingYandex.value = false
+            }
+        }
     }
 
     fun openYandexMusic() {
-        val i = appContext.packageManager
-            .getLaunchIntentForPackage(ExternalSessionBridge.PKG_YANDEX_MUSIC)
-            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (i != null) appContext.startActivity(i)
+        external.launchApp()
+    }
+
+    /** Лайк текущего трека в стороннем приложении. */
+    fun toggleLike() {
+        if (_source.value == MusicSource.YANDEX) external.toggleLike()
     }
 
     /* ─────────────────  ТРАНСПОРТ  ───────────────── */
@@ -243,9 +301,9 @@ object PlayerHub {
     fun cycleSource() {
         when (_source.value) {
             MusicSource.DEVICE -> _stations.value.firstOrNull()?.let { playStation(it) }
-            MusicSource.RADIO -> switchToYandex(launchApp = true)
+            MusicSource.RADIO -> switchToYandex()
             MusicSource.YANDEX -> {
-                controller?.pause()
+                external.pause()
                 _tracks.value.takeIf { it.isNotEmpty() }?.let { playTracks(it, 0) }
                     ?: run { _source.value = MusicSource.DEVICE }
             }

@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -25,6 +26,12 @@
 
     <!-- Автозапуск оболочки после включения ГУ -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Панели оболочки поверх запущенной навигации -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Контакты в экране телефона -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- Bluetooth: определяем подключённый телефон -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -114,6 +121,16 @@
             android:name=".automation.AutomationService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Панели оболочки поверх карты -->
+        <service
+            android:name=".overlay.NeonOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Панели автомобильной оболочки поверх навигации" />
+        </service>
 
         <receiver
             android:name=".automation.BootReceiver"

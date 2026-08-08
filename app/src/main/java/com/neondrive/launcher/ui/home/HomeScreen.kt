@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,7 @@ import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.media.NowPlaying
+import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.ui.NeonScreen
 
 /**
@@ -51,6 +54,11 @@ fun HomeScreen(
     onAllApps: () -> Unit,
     onLauncherSettings: () -> Unit
 ) {
+    // Состояние лайка и подключения читаем прямо у хаба — оно нужно только плееру
+    val liked by PlayerHub.external.liked.collectAsState()
+    val canLike by PlayerHub.external.canLike.collectAsState()
+    val connecting by PlayerHub.connectingYandex.collectAsState()
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val columnWidth = maxWidth * 0.25f
 
@@ -102,6 +110,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
+                    liked = liked,
+                    canLike = canLike,
+                    connecting = connecting,
+                    onLike = { PlayerHub.toggleLike() },
                     onSource = onSource,
                     onPlayPause = onPlayPause,
                     onNext = onNext,
@@ -114,12 +126,9 @@ fun HomeScreen(
             // Карта — всё остальное пространство
             MapPanel(
                 gps = gps,
+                settings = settings,
                 accent = accent,
                 accent2 = accent2,
-                navPackage = settings.mapPackage,
-                navWindowed = settings.navWindowed,
-                homeLat = settings.homeLat,
-                homeLon = settings.homeLon,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()

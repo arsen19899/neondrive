@@ -77,6 +77,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-service:2.8.6")
     implementation("androidx.lifecycle:lifecycle-process:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6")
+    // Владельцы жизненного цикла для Compose в окнах WindowManager
+    implementation("androidx.savedstate:savedstate-ktx:1.2.1")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))

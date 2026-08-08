@@ -13,12 +13,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,14 +24,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
-import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.automation.GpsState
+import com.neondrive.launcher.data.LauncherSettings
+import com.neondrive.launcher.data.MapMode
+import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonGlow
@@ -58,54 +60,48 @@ import com.neondrive.launcher.ui.theme.neonPanel
 import kotlin.math.roundToInt
 
 /**
- * Панель навигации. Занимает две трети рабочего стола.
+ * Панель навигации — две трети рабочего стола.
  *
- * Яндекс.Навигатор — отдельное приложение и внутрь чужого окна его не встроить,
- * поэтому панель работает как «стекло»: рисует собственный киберпанк-HUD, отдаёт
- * быстрые команды навигатору (домой, работа, поиск, заправки) и разворачивает его
- * на весь экран одним касанием. Если в проект добавлен Yandex MapKit с ключом,
- * достаточно подменить [MapCanvas] на MapView — остальная разметка не меняется.
+ * Панель постоянно сообщает свои экранные границы в [MapFrameController]: по ним
+ * навигационное приложение поднимается плавающим окном ровно в этот прямоугольник
+ * (режим «Во фрейме») либо на весь экран с панелями оболочки поверх (режим
+ * «Поверх карты»). Пока приложение не поднято, панель рисует собственный HUD по
+ * данным GPS, чтобы рабочий стол не выглядел пустым.
  */
 @Composable
 fun MapPanel(
     gps: GpsState,
+    settings: LauncherSettings,
     accent: Color,
     accent2: Color,
-    navPackage: String,
-    navWindowed: Boolean,
-    homeLat: Double,
-    homeLon: Double,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    // Границы панели на экране — по ним открываем навигатор в окне
-    var bounds by remember { mutableStateOf(Rect()) }
-
-    val openNav: () -> Unit = {
-        if (navWindowed && !bounds.isEmpty) {
-            NavigatorBridge.openWindowed(context, navPackage, bounds)
-        } else {
-            NavigatorBridge.openFullscreen(context, navPackage)
-        }
+    val overlayActive by MapFrameController.active.collectAsState()
+    val navLabel = remember(settings.mapPackage) {
+        NavigatorBridge.labelOf(context, settings.mapPackage)
     }
+
+    val launch: () -> Unit = { MapFrameController.launch(context, settings) }
 
     Box(
         modifier
             .onGloballyPositioned { coords ->
                 val r = coords.boundsInWindow()
-                bounds = Rect(
-                    r.left.roundToInt(), r.top.roundToInt(),
-                    r.right.roundToInt(), r.bottom.roundToInt()
+                MapFrameController.updateBounds(
+                    Rect(
+                        r.left.roundToInt(), r.top.roundToInt(),
+                        r.right.roundToInt(), r.bottom.roundToInt()
+                    )
                 )
             }
             .neonGlow(accent, 26.dp, 0.14f, 16.dp)
             .neonPanel(accent, radius = 26.dp)
             .clip(RoundedCornerShape(26.dp))
-            .clickable(onClick = openNav)
+            .clickable(onClick = launch)
     ) {
         MapCanvas(accent = accent, accent2 = accent2, moving = gps.speedKmh > 1f)
 
-        // Верхняя строка: статус и кнопка «развернуть»
         Row(
             Modifier
                 .fillMaxWidth()
@@ -126,9 +122,9 @@ fun MapPanel(
                     )
                     Spacer(Modifier.size(7.dp))
                     Text(
-                        "ЯНДЕКС НАВИГАТОР",
+                        navLabel.uppercase(),
                         fontSize = 10.sp,
-                        letterSpacing = 1.6.sp,
+                        letterSpacing = 1.4.sp,
                         fontFamily = FontFamily.Monospace,
                         color = Neon.TextMid
                     )
@@ -144,7 +140,29 @@ fun MapPanel(
             )
         }
 
-        // Нижняя панель быстрых действий
+        // Подсказка про активный режим — по центру, поверх HUD
+        if (settings.mapMode != MapMode.OFF) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xB3060B14))
+                    .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .clickable(onClick = launch)
+                    .padding(horizontal = 22.dp, vertical = 14.dp)
+            ) {
+                Text(
+                    if (settings.mapMode == MapMode.FRAME)
+                        "Нажмите, чтобы открыть $navLabel во фрейме"
+                    else
+                        "Нажмите, чтобы открыть $navLabel с панелями поверх",
+                    fontSize = 12.sp,
+                    color = accent2,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
         Row(
             Modifier
                 .align(Alignment.BottomStart)
@@ -154,50 +172,66 @@ fun MapPanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             QuickChip("Домой", Icons.Rounded.Home, accent) {
-                if (!homeLat.isNaN() && !homeLon.isNaN()) {
+                if (settings.hasHomePoint) {
                     NavigatorBridge.buildRoute(
-                        context, homeLat, homeLon,
+                        context, settings.mapPackage,
+                        settings.homeLat, settings.homeLon,
                         gps.lastLat.takeIf { gps.hasFix },
                         gps.lastLon.takeIf { gps.hasFix }
                     )
                 } else {
                     Toast.makeText(
                         context,
-                        "Точка «Дом» не задана: настройки оболочки → Внешний вид",
+                        "Точка «Дом» не задана: настройки оболочки → Навигатор",
                         Toast.LENGTH_LONG
                     ).show()
                 }
             }
             QuickChip("Я здесь", Icons.Rounded.MyLocation, accent) {
                 if (gps.hasFix) {
-                    NavigatorBridge.showPoint(context, gps.lastLat, gps.lastLon, 16, "Моя позиция")
+                    NavigatorBridge.showPoint(
+                        context, settings.mapPackage, gps.lastLat, gps.lastLon, 16, "Моя позиция"
+                    )
                 } else {
                     Toast.makeText(context, "Нет GPS-фикса", Toast.LENGTH_SHORT).show()
                 }
             }
-            if (navWindowed) {
-                QuickChip("В окне", Icons.Rounded.PictureInPictureAlt, accent2) {
-                    NavigatorBridge.openWindowed(context, navPackage, bounds)
+            if (overlayActive) {
+                QuickChip("Убрать панели", Icons.Rounded.VisibilityOff, Neon.Red) {
+                    MapFrameController.stop(context)
                 }
             }
+
             Spacer(Modifier.weight(1f))
+
             Box(
                 Modifier
                     .neonGlow(accent2, 16.dp, 0.35f, 10.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(accent2.copy(alpha = 0.20f))
                     .border(1.dp, accent2.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
-                    .clickable(onClick = openNav)
+                    .clickable(onClick = launch)
                     .padding(horizontal = 18.dp, vertical = 10.dp)
             ) {
-                Text(
-                    "РАЗВЕРНУТЬ",
-                    fontSize = 11.sp,
-                    letterSpacing = 1.4.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
-                    color = accent2
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.OpenInFull, null,
+                        tint = accent2, modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(Modifier.size(7.dp))
+                    Text(
+                        when (settings.mapMode) {
+                            MapMode.FRAME -> "ВО ФРЕЙМЕ"
+                            MapMode.OVERLAY -> "ПОВЕРХ КАРТЫ"
+                            MapMode.OFF -> "РАЗВЕРНУТЬ"
+                        },
+                        fontSize = 11.sp,
+                        letterSpacing = 1.4.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = accent2
+                    )
+                }
             }
         }
     }
@@ -206,7 +240,7 @@ fun MapPanel(
 @Composable
 private fun QuickChip(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     color: Color,
     onClick: () -> Unit
 ) {
@@ -243,58 +277,37 @@ private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
     Canvas(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    listOf(Color(0xFF071019), Color(0xFF04070E))
-                )
-            )
+            .background(Brush.radialGradient(listOf(Color(0xFF071019), Color(0xFF04070E))))
     ) {
         val w = size.width
         val h = size.height
 
-        // Кварталы
         val cell = 96f
         val offset = scroll * cell
         var x = -cell + offset
         while (x < w + cell) {
-            drawLine(
-                color = accent.copy(alpha = 0.055f),
-                start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f
-            )
+            drawLine(accent.copy(alpha = 0.055f), Offset(x, 0f), Offset(x, h), 1f)
             x += cell
         }
         var y = -cell + offset
         while (y < h + cell) {
-            drawLine(
-                color = accent.copy(alpha = 0.055f),
-                start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f
-            )
+            drawLine(accent.copy(alpha = 0.055f), Offset(0f, y), Offset(w, y), 1f)
             y += cell
         }
 
-        // Крупные улицы
         drawLine(
-            color = accent.copy(alpha = 0.13f),
-            start = Offset(0f, h * 0.34f), end = Offset(w, h * 0.30f), strokeWidth = 14f
+            accent.copy(alpha = 0.13f),
+            Offset(0f, h * 0.34f), Offset(w, h * 0.30f), 14f
         )
         drawLine(
-            color = accent.copy(alpha = 0.10f),
-            start = Offset(w * 0.72f, 0f), end = Offset(w * 0.64f, h), strokeWidth = 11f
+            accent.copy(alpha = 0.10f),
+            Offset(w * 0.72f, 0f), Offset(w * 0.64f, h), 11f
         )
 
-        // Маршрут
         val route = Path().apply {
             moveTo(w * 0.5f, h + 40f)
-            cubicTo(
-                w * 0.5f, h * 0.72f,
-                w * 0.30f, h * 0.60f,
-                w * 0.33f, h * 0.40f
-            )
-            cubicTo(
-                w * 0.36f, h * 0.22f,
-                w * 0.62f, h * 0.22f,
-                w * 0.70f, h * 0.06f
-            )
+            cubicTo(w * 0.5f, h * 0.72f, w * 0.30f, h * 0.60f, w * 0.33f, h * 0.40f)
+            cubicTo(w * 0.36f, h * 0.22f, w * 0.62f, h * 0.22f, w * 0.70f, h * 0.06f)
         }
         drawPath(
             route,
@@ -307,7 +320,6 @@ private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
             style = Stroke(width = 4f, cap = StrokeCap.Round)
         )
 
-        // Маркер автомобиля
         val cx = w * 0.5f
         val cy = h * 0.78f
         drawCircle(
@@ -327,7 +339,6 @@ private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
         drawPath(car, color = accent)
         drawPath(car, color = Color.White.copy(alpha = 0.5f), style = Stroke(1.5f))
 
-        // Лёгкая «вуаль» по краям, чтобы текст читался
         drawRect(
             brush = Brush.verticalGradient(
                 0f to Color(0xCC04070E),
@@ -337,7 +348,6 @@ private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
             )
         )
 
-        // Скан-линия
         val scanY = h * ((scroll * 1.3f) % 1f)
         drawLine(
             brush = Brush.horizontalGradient(
@@ -347,4 +357,3 @@ private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
         )
     }
 }
-

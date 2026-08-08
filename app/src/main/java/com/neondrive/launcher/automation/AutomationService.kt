@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
@@ -97,6 +98,24 @@ class AutomationService : LifecycleService() {
         lifecycleScope.launch { notificationLoop() }
         lifecycleScope.launch { mainLoop() }
         SpeedProvider.start(applicationContext)
+        registerScreenReceiver()
+    }
+
+    /* ─────────────────  ПРОБУЖДЕНИЕ ЭКРАНА  ───────────────── */
+
+    private var screenReceiver: ScreenOnReceiver? = null
+
+    private fun registerScreenReceiver() {
+        val receiver = ScreenOnReceiver { settings.startOnScreenOn }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }.onSuccess { screenReceiver = receiver }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -115,6 +134,8 @@ class AutomationService : LifecycleService() {
     override fun onDestroy() {
         SpeedProvider.stop()
         SteeringWheelManager.stopAdc()
+        screenReceiver?.let { r -> runCatching { unregisterReceiver(r) } }
+        screenReceiver = null
         super.onDestroy()
     }
 
@@ -154,11 +175,9 @@ class AutomationService : LifecycleService() {
             }
             MusicSource.RADIO -> PlayerHub.stations.value.firstOrNull()
                 ?.let { PlayerHub.playStation(it) }
-            MusicSource.YANDEX -> {
-                PlayerHub.switchToYandex(launchApp = true)
-                delay(2500)
-                PlayerHub.play()
-            }
+            // Подключение и запуск берёт на себя сам хаб: он поднимет приложение
+            // и дождётся появления медиасессии
+            MusicSource.YANDEX -> PlayerHub.switchToYandex(launchApp = true, autoPlay = true)
         }
     }
 

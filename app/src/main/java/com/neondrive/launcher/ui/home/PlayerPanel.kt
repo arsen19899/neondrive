@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -63,6 +65,10 @@ fun PlayerPanel(
     accent2: Color,
     volumePercent: Int,
     modifier: Modifier = Modifier,
+    liked: Boolean? = null,
+    canLike: Boolean = false,
+    connecting: Boolean = false,
+    onLike: () -> Unit = {},
     onSource: (MusicSource) -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -138,7 +144,10 @@ fun PlayerPanel(
             Spacer(Modifier.padding(horizontal = 6.dp))
 
             Column(Modifier.weight(1f)) {
-                HudLabel(now.sourceLabel.ifBlank { source.label }, accent2)
+                HudLabel(
+                    if (connecting) "Подключение…" else now.sourceLabel.ifBlank { source.label },
+                    accent2
+                )
                 Spacer(Modifier.height(3.dp))
                 Text(
                     now.title,
@@ -152,9 +161,41 @@ fun PlayerPanel(
                     now.subtitle,
                     color = Neon.TextLow,
                     fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 14.sp
                 )
+            }
+
+            // Лайк доступен, когда его поддерживает сессия стороннего приложения
+            if (canLike) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .then(
+                            if (liked == true) Modifier.neonGlow(Neon.Magenta, 20.dp, 0.4f, 8.dp)
+                            else Modifier
+                        )
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (liked == true) Neon.Magenta.copy(alpha = 0.2f) else Color(0x550C1424)
+                        )
+                        .border(
+                            1.dp,
+                            if (liked == true) Neon.Magenta.copy(alpha = 0.85f)
+                            else Neon.TextLow.copy(alpha = 0.35f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable(onClick = onLike),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        "Нравится",
+                        tint = if (liked == true) Neon.Magenta else Neon.TextMid,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 

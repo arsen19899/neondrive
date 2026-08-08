@@ -17,6 +17,34 @@ enum class MusicSource(val label: String) {
 
 enum class SidebarSide { LEFT, RIGHT }
 
+/**
+ * Как показывать навигационное приложение на рабочем столе.
+ *
+ * Android не даёт стороннему лаунчеру рисовать чужое окно внутри своего, поэтому
+ * «карта во фрейме» достигается одним из двух обходных путей.
+ */
+enum class MapMode(val label: String, val hint: String) {
+    /** Панель рисует свой HUD, приложение открывается по нажатию на весь экран. */
+    OFF(
+        "Обычный",
+        "Панель рисует свой HUD, навигация открывается по нажатию"
+    ),
+
+    /** Плавающее окно приложения ровно по границам панели. Нужен freeform в прошивке. */
+    FRAME(
+        "Во фрейме",
+        "Приложение запускается плавающим окном по границам панели. " +
+            "Требуется поддержка freeform в прошивке головного устройства"
+    ),
+
+    /** Навигация на весь экран, панели оболочки — поверх неё. Работает везде. */
+    OVERLAY(
+        "Поверх карты",
+        "Навигация занимает весь экран, приборы и плеер оболочки висят поверх неё " +
+            "по краям. Работает на любой прошивке, нужно разрешение «Поверх других приложений»"
+    )
+}
+
 enum class SpeedUnits(val label: String, val factorFromMs: Float) {
     KMH("км/ч", 3.6f),
     MPH("mph", 2.2369363f)
@@ -79,15 +107,19 @@ data class LauncherSettings(
     val mapPackage: String = "ru.yandex.yandexnavi",
 
     /* Навигация */
-    /** Открывать навигатор в окне по границам панели карты (нужен freeform). */
-    val navWindowed: Boolean = false,
+    /** Режим показа навигационного приложения на рабочем столе. */
+    val mapMode: MapMode = MapMode.OFF,
+    /** Поднимать навигацию автоматически при запуске оболочки. */
+    val mapAutoStart: Boolean = false,
+    /** Пауза перед автозапуском навигации, чтобы система успела подняться, с. */
+    val mapAutoStartDelaySec: Int = 4,
     /** Сохранённая точка «Дом»; NaN — не задана. */
     val homeLat: Double = Double.NaN,
     val homeLon: Double = Double.NaN,
 
     /* 1. Автопроигрывание музыки */
     val autoplay: Boolean = true,
-    val autoplayDelaySec: Int = 3,
+    val autoplayDelaySec: Int = 0,
     val autoplaySource: MusicSource = MusicSource.DEVICE,
 
     /* 2. Реакция на уведомления с подключённого девайса */
@@ -126,6 +158,10 @@ data class LauncherSettings(
 
     /* Прочее */
     val startOnBoot: Boolean = true,
+    /** Поднимать оболочку при каждом включении экрана — «пробуждении» магнитолы. */
+    val startOnScreenOn: Boolean = true,
+    /** Пользователь хочет, чтобы NeonDrive был лаунчером по умолчанию. */
+    val beDefaultLauncher: Boolean = false,
     val keepScreenOn: Boolean = true
 ) {
     val hasHomePoint: Boolean get() = !homeLat.isNaN() && !homeLon.isNaN()

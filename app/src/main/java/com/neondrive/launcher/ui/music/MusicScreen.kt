@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val tracks by PlayerHub.tracks.collectAsState()
     val stations by PlayerHub.stations.collectAsState()
     val now by PlayerHub.now.collectAsState()
@@ -160,11 +161,25 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                         )
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ActionChip("Открыть приложение", accent2) {
+                            ActionChip("Подключиться и играть", accent2) {
+                                PlayerHub.switchToYandex(launchApp = true, autoPlay = true)
+                            }
+                            ActionChip("Открыть приложение", accent) {
                                 PlayerHub.openYandexMusic()
                             }
-                            ActionChip("Подключиться", accent) {
-                                PlayerHub.switchToYandex(launchApp = true)
+                            if (!PlayerHub.external.hasAccess()) {
+                                ActionChip("Выдать доступ", Neon.Red) {
+                                    runCatching {
+                                        context.startActivity(
+                                            android.content.Intent(
+                                                android.provider.Settings
+                                                    .ACTION_NOTIFICATION_LISTENER_SETTINGS
+                                            ).addFlags(
+                                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

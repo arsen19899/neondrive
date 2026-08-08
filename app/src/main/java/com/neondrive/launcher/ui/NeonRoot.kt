@@ -24,7 +24,7 @@ import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.NavigatorBridge
+import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.ui.apps.AllAppsScreen
 import com.neondrive.launcher.ui.eq.EqualizerScreen
 import com.neondrive.launcher.ui.home.HomeScreen
@@ -34,6 +34,7 @@ import com.neondrive.launcher.ui.settings.SettingsScreen
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.NeonBackdrop
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class NeonScreen { HOME, APPS, SETTINGS, EQUALIZER, MUSIC, PHONE }
@@ -71,6 +72,16 @@ fun NeonRoot(
         runCatching { PlayerHub.refreshLibrary() }
     }
 
+    // Автозапуск навигации во фрейме. Для плавающего окна сначала дожидаемся,
+    // пока панель карты сообщит свои экранные границы.
+    LaunchedEffect(settings.mapAutoStart, settings.mapMode, settings.mapPackage) {
+        runCatching {
+            MapFrameController.autoStartIfNeeded(context, settings) {
+                MapFrameController.frameBounds.first { !it.isEmpty }
+            }
+        }
+    }
+
     NeonBackdrop(accent, accent2, animated = settings.animatedBackground) {
         AnimatedContent(
             targetState = screen,
@@ -106,9 +117,7 @@ fun NeonRoot(
                     onVolume = { up -> PlayerHub.nudgeVolume(up); volume = PlayerHub.volumePercent() },
                     onOpenLibrary = { screen = NeonScreen.MUSIC },
                     onPhone = { screen = NeonScreen.PHONE },
-                    onNavigation = {
-                        NavigatorBridge.openFullscreen(context, settings.mapPackage)
-                    },
+                    onNavigation = { MapFrameController.launch(context, settings) },
                     onEqualizer = { screen = NeonScreen.EQUALIZER },
                     onAndroidSettings = {
                         runCatching {

@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             "settings" -> NeonScreen.SETTINGS
             "eq" -> NeonScreen.EQUALIZER
             "music" -> NeonScreen.MUSIC
+            "phone" -> NeonScreen.PHONE
             else -> NeonScreen.HOME
         }
 
@@ -118,7 +119,8 @@ class MainActivity : ComponentActivity() {
     private fun requestNeededPermissions() {
         val need = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CONTACTS
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             need += Manifest.permission.READ_MEDIA_AUDIO

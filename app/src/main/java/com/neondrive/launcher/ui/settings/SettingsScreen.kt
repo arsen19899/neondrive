@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.automation.NeonNotificationListener
 import com.neondrive.launcher.automation.SpeedProvider
 import com.neondrive.launcher.data.LauncherSettings
+import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.NotificationReaction
 import com.neondrive.launcher.data.SettingsRepository
@@ -46,7 +50,10 @@ import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.data.SpeedUnits
 import com.neondrive.launcher.data.SpeedVolumeStep
 import com.neondrive.launcher.data.SwcAction
+import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
+import com.neondrive.launcher.overlay.NeonOverlayService
+import com.neondrive.launcher.system.DefaultLauncherHelper
 import com.neondrive.launcher.ui.common.HudLabel
 import com.neondrive.launcher.ui.common.NeonSegmented
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
@@ -62,6 +69,7 @@ import kotlin.math.roundToInt
 typealias SettingsEdit = (suspend (SettingsRepository) -> Unit) -> Unit
 
 private enum class Tab(val title: String) {
+    NAV("Навигация"),
     MUSIC("Музыка"),
     REACTIONS("Реакции"),
     SPEED("Скорость"),
@@ -78,7 +86,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     edit: SettingsEdit
 ) {
-    var tab by remember { mutableStateOf(Tab.MUSIC) }
+    var tab by remember { mutableStateOf(Tab.NAV) }
 
     NeonScreenScaffold(
         title = "Настройки оболочки",
@@ -90,7 +98,10 @@ fun SettingsScreen(
 
             // Вертикальные вкладки
             Column(
-                Modifier.width(190.dp),
+                Modifier
+                    .width(190.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Tab.entries.forEach { t ->
@@ -126,6 +137,7 @@ fun SettingsScreen(
             ) {
                 item {
                     when (tab) {
+                        Tab.NAV -> NavTab(settings, accent, accent2, edit)
                         Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
                         Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
                         Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
@@ -617,106 +629,209 @@ private fun LookTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Se
                     accent = accent2
                 ) { v -> edit { it.setUnits(v) } }
             }
-            SettingRow("Приложение навигации", s.mapPackage, accent2) {
-                NeonSegmented(
-                    options = NAV_PACKAGES,
-                    selected = s.mapPackage.takeIf { it in NAV_PACKAGES } ?: NAV_PACKAGES.first(),
-                    label = { NAV_LABELS[it] ?: it },
-                    accent = accent2
-                ) { v -> edit { it.setMapPackage(v) } }
-            }
         }
-
-        NavigationSection(s, accent, accent2, edit)
     }
 }
+
+/* ═════════════════════  НАВИГАЦИЯ  ═════════════════════ */
 
 @Composable
-private fun NavigationSection(
-    s: LauncherSettings,
-    accent: Color,
-    accent2: Color,
-    edit: SettingsEdit
-) {
+private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: SettingsEdit) {
     val context = LocalContext.current
     val gps by SpeedProvider.state.collectAsState()
-    val installed = NavigatorBridge.isInstalled(context, s.mapPackage)
+    val apps = remember { NavigatorBridge.installedNavApps(context) }
+    val freeform = remember { NavigatorBridge.freeformSupported(context) }
+    val canOverlay = NeonOverlayService.canDraw(context)
 
-    SettingsSection("Навигатор", accent) {
-        SettingRow(
-            "Яндекс.Навигатор",
-            if (installed) "Установлен — оболочка управляет им через deep links"
-            else "Не найден на устройстве",
-            accent
-        ) {
-            SmallButton("Открыть", accent) {
-                NavigatorBridge.openFullscreen(context, s.mapPackage)
-            }
-        }
-
-        SettingRow(
-            "Открывать в окне поверх панели",
-            "Навигатор запускается в плавающем окне по границам карты. " +
-                "Нужен freeform-режим прошивки — если он выключен, откроется на весь экран",
-            accent
-        ) {
-            NeonToggle(s.navWindowed, accent) { v -> edit { it.setNavWindowed(v) } }
-        }
-
-        SettingRow(
-            "Точка «Дом»",
-            if (s.hasHomePoint) "%.5f, %.5f".format(s.homeLat, s.homeLon)
-            else "Не задана — кнопка «Домой» на карте пока неактивна",
-            accent2
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallButton(
-                    if (gps.hasFix) "Запомнить здесь" else "Нет GPS",
-                    if (gps.hasFix) accent2 else Neon.TextLow
-                ) {
-                    if (gps.hasFix) {
-                        edit { it.setHomePoint(gps.lastLat, gps.lastLon) }
+    Column {
+        SettingsSection("Приложение навигации", accent) {
+            if (apps.isEmpty()) {
+                Hint("На устройстве не найдено ни одного навигационного приложения.", accent2)
+            } else {
+                apps.forEach { app ->
+                    val chosen = app.packageName == s.mapPackage
+                    SettingRow(
+                        app.label,
+                        app.packageName,
+                        accent
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SmallButton("Открыть", Neon.TextMid) {
+                                NavigatorBridge.openFullscreen(context, app.packageName)
+                            }
+                            NeonToggle(chosen, accent) {
+                                edit { it.setMapPackage(app.packageName) }
+                            }
+                        }
                     }
                 }
-                if (s.hasHomePoint) {
-                    SmallButton("Сброс", accent) { edit { it.clearHomePoint() } }
+            }
+        }
+
+        SettingsSection("Карта во фрейме", accent2) {
+            SettingRow(
+                "Режим показа",
+                s.mapMode.hint,
+                accent2
+            ) {
+                NeonSegmented(
+                    options = MapMode.entries.toList(),
+                    selected = s.mapMode,
+                    label = { it.label },
+                    accent = accent2
+                ) { v -> edit { it.setMapMode(v) } }
+            }
+
+            if (s.mapMode == MapMode.FRAME) {
+                SettingRow(
+                    "Поддержка плавающих окон",
+                    if (freeform) "Прошивка сообщает о поддержке freeform — режим будет работать"
+                    else "Прошивка о поддержке не сообщает. Включите freeform по инструкции " +
+                        "ниже или выберите режим «Поверх карты»",
+                    if (freeform) accent2 else Neon.Amber
+                ) {
+                    SmallButton(if (freeform) "Готово" else "Нет", if (freeform) accent2 else Neon.Amber) {}
+                }
+                Hint(
+                    "Включение freeform на головном устройстве, один раз через adb:\n" +
+                        "adb shell settings put global enable_freeform_support 1\n" +
+                        "adb shell settings put global force_resizable_activities 1\n" +
+                        "После этого перезагрузите устройство.",
+                    accent2
+                )
+            }
+
+            if (s.mapMode == MapMode.OVERLAY) {
+                SettingRow(
+                    "Разрешение «Поверх других приложений»",
+                    if (canOverlay) "Выдано — панели лягут поверх карты"
+                    else "Не выдано, без него режим не запустится",
+                    if (canOverlay) accent2 else Neon.Amber
+                ) {
+                    SmallButton(
+                        if (canOverlay) "Выдано" else "Выдать",
+                        if (canOverlay) accent2 else Neon.Amber
+                    ) {
+                        if (!canOverlay) NeonOverlayService.requestPermission(context)
+                    }
+                }
+            }
+
+            if (s.mapMode != MapMode.OFF) {
+                SettingRow(
+                    "Запускать навигацию автоматически",
+                    "Сразу после старта оболочки карта поднимается сама — не нужно ничего нажимать",
+                    accent2
+                ) {
+                    NeonToggle(s.mapAutoStart, accent2) { v -> edit { it.setMapAutoStart(v) } }
+                }
+                if (s.mapAutoStart) {
+                    SettingRow(
+                        "Задержка автозапуска",
+                        "${s.mapAutoStartDelaySec} с — чтобы система и GPS успели подняться",
+                        accent2
+                    ) {
+                        NeonSlider(
+                            value = s.mapAutoStartDelaySec.toFloat(),
+                            range = 0f..30f,
+                            accent = accent2,
+                            modifier = Modifier.width(220.dp)
+                        ) { v -> edit { it.setMapAutoStartDelay(v.roundToInt()) } }
+                    }
+                }
+                SettingRow("Проверить сейчас", "Поднять карту в выбранном режиме", accent) {
+                    SmallButton("Запустить", accent) {
+                        MapFrameController.launch(context, s)
+                    }
                 }
             }
         }
+
+        SettingsSection("Точка «Дом»", accent) {
+            SettingRow(
+                "Сохранённая точка",
+                if (s.hasHomePoint) "%.5f, %.5f".format(s.homeLat, s.homeLon)
+                else "Не задана — кнопка «Домой» на карте пока неактивна",
+                accent
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallButton(
+                        if (gps.hasFix) "Запомнить здесь" else "Нет GPS",
+                        if (gps.hasFix) accent2 else Neon.TextLow
+                    ) {
+                        if (gps.hasFix) edit { it.setHomePoint(gps.lastLat, gps.lastLon) }
+                    }
+                    if (s.hasHomePoint) {
+                        SmallButton("Сброс", accent) { edit { it.clearHomePoint() } }
+                    }
+                }
+            }
+        }
+
+        Hint(
+            "Встроить чужое окно внутрь своего Android не позволяет, а рисовать карту " +
+                "самостоятельно нельзя без ключа MapKit — подписка Плюс в Навигаторе такого " +
+                "права не даёт. Поэтому «карта во фрейме» делается двумя честными способами: " +
+                "плавающим окном по границам панели или полноэкранной картой с панелями " +
+                "оболочки поверх неё. Второй способ работает на любой прошивке.",
+            accent2
+        )
     }
-
-    Hint(
-        "Подписка Плюс в самом Навигаторе относится к аккаунту внутри того приложения " +
-            "и не даёт стороннему лаунчеру рисовать карту Яндекса у себя — для этого нужен " +
-            "ключ MapKit/NaviKit SDK. Поэтому оболочка использует то, что работает без ключа: " +
-            "URL-схемы Навигатора и запуск его окна поверх панели карты.",
-        accent2
-    )
 }
-
-private val NAV_PACKAGES = listOf(
-    "ru.yandex.yandexnavi",
-    "ru.yandex.yandexmaps",
-    "com.google.android.apps.maps"
-)
-private val NAV_LABELS = mapOf(
-    "ru.yandex.yandexnavi" to "Навигатор",
-    "ru.yandex.yandexmaps" to "Я.Карты",
-    "com.google.android.apps.maps" to "Google"
-)
 
 /* ═════════════════════  6. СИСТЕМА  ═════════════════════ */
 
 @Composable
 private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: SettingsEdit) {
     val context = LocalContext.current
+    val isDefault = DefaultLauncherHelper.isDefault(context)
+
     Column {
-        SettingsSection("Поведение", accent) {
-            SettingRow("Запуск при включении", "Автоматика поднимается вместе с системой", accent) {
-                NeonToggle(s.startOnBoot, accent) { v -> edit { it.setStartOnBoot(v) } }
+        SettingsSection("Оболочка по умолчанию", accent) {
+            SettingRow(
+                "Сделать NeonDrive рабочим столом",
+                if (isDefault) "NeonDrive уже назначен домашним экраном"
+                else "Система откроет выбор домашнего экрана — отметьте NeonDrive",
+                if (isDefault) accent else Neon.Amber
+            ) {
+                NeonToggle(s.beDefaultLauncher || isDefault, accent) { v ->
+                    edit { it.setBeDefaultLauncher(v) }
+                    if (v && !isDefault) DefaultLauncherHelper.requestDefault(context)
+                }
             }
-            SettingRow("Не гасить экран", "Держать подсветку, пока открыт рабочий стол", accent) {
-                NeonToggle(s.keepScreenOn, accent) { v -> edit { it.setKeepScreenOn(v) } }
+
+            if (!isDefault) {
+                SettingRow(
+                    "Диалог выбора не появляется?",
+                    "Значит домашний экран уже закреплён за другим приложением. " +
+                        "Откройте его карточку и нажмите «Удалить настройки по умолчанию»",
+                    Neon.Amber
+                ) {
+                    SmallButton("Открыть", Neon.Amber) {
+                        DefaultLauncherHelper.openCurrentLauncherSettings(context)
+                    }
+                }
+            }
+
+            SettingRow(
+                "Запускать при пробуждении",
+                "При каждом включении экрана оболочка выходит на передний план. " +
+                    "Работает, когда NeonDrive назначен домашним экраном",
+                accent
+            ) {
+                NeonToggle(s.startOnScreenOn, accent) { v -> edit { it.setStartOnScreenOn(v) } }
+            }
+        }
+
+        SettingsSection("Поведение", accent2) {
+            SettingRow("Запуск при включении", "Автоматика поднимается вместе с системой", accent2) {
+                NeonToggle(s.startOnBoot, accent2) { v -> edit { it.setStartOnBoot(v) } }
+            }
+            SettingRow("Не гасить экран", "Держать подсветку, пока открыт рабочий стол", accent2) {
+                NeonToggle(s.keepScreenOn, accent2) { v -> edit { it.setKeepScreenOn(v) } }
             }
         }
 
@@ -736,17 +851,17 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
                     }
                 }
             }
-            SettingRow("Лаунчер по умолчанию", "Сделать NeonDrive рабочим столом", accent2) {
-                SmallButton("Выбрать", accent2) {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Settings.ACTION_HOME_SETTINGS)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    }
+            SettingRow(
+                "Поверх других приложений",
+                if (NeonOverlayService.canDraw(context)) "Выдано"
+                else "Нужно для режима «Поверх карты»",
+                accent2
+            ) {
+                SmallButton("Открыть", accent2) {
+                    NeonOverlayService.requestPermission(context)
                 }
             }
-            SettingRow("Разрешения приложения", "Геолокация, музыка, телефон", accent2) {
+            SettingRow("Разрешения приложения", "Геолокация, музыка, телефон, контакты", accent2) {
                 SmallButton("Открыть", accent2) {
                     runCatching {
                         context.startActivity(

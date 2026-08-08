@@ -28,7 +28,9 @@ class SettingsRepository(private val context: Context) {
         val show24h = booleanPreferencesKey("show_24h")
         val units = stringPreferencesKey("units")
         val mapPackage = stringPreferencesKey("map_package")
-        val navWindowed = booleanPreferencesKey("nav_windowed")
+        val mapMode = stringPreferencesKey("map_mode")
+        val mapAutoStart = booleanPreferencesKey("map_auto_start")
+        val mapAutoStartDelay = intPreferencesKey("map_auto_start_delay")
         val homeLat = doublePreferencesKey("home_lat")
         val homeLon = doublePreferencesKey("home_lon")
 
@@ -58,6 +60,8 @@ class SettingsRepository(private val context: Context) {
         val swcAdcMap = stringPreferencesKey("swc_adc_map")
 
         val startOnBoot = booleanPreferencesKey("start_on_boot")
+        val startOnScreenOn = booleanPreferencesKey("start_on_screen_on")
+        val beDefaultLauncher = booleanPreferencesKey("be_default_launcher")
         val keepScreenOn = booleanPreferencesKey("keep_screen_on")
     }
 
@@ -71,7 +75,10 @@ class SettingsRepository(private val context: Context) {
             show24h = p[K.show24h] ?: d.show24h,
             units = p[K.units]?.let { runCatching { SpeedUnits.valueOf(it) }.getOrNull() } ?: d.units,
             mapPackage = p[K.mapPackage] ?: d.mapPackage,
-            navWindowed = p[K.navWindowed] ?: d.navWindowed,
+            mapMode = p[K.mapMode]?.let { runCatching { MapMode.valueOf(it) }.getOrNull() }
+                ?: d.mapMode,
+            mapAutoStart = p[K.mapAutoStart] ?: d.mapAutoStart,
+            mapAutoStartDelaySec = p[K.mapAutoStartDelay] ?: d.mapAutoStartDelaySec,
             homeLat = p[K.homeLat] ?: d.homeLat,
             homeLon = p[K.homeLon] ?: d.homeLon,
 
@@ -105,6 +112,8 @@ class SettingsRepository(private val context: Context) {
             swcAdcMap = p[K.swcAdcMap]?.let(::decodeActions) ?: d.swcAdcMap,
 
             startOnBoot = p[K.startOnBoot] ?: d.startOnBoot,
+            startOnScreenOn = p[K.startOnScreenOn] ?: d.startOnScreenOn,
+            beDefaultLauncher = p[K.beDefaultLauncher] ?: d.beDefaultLauncher,
             keepScreenOn = p[K.keepScreenOn] ?: d.keepScreenOn
         )
     }
@@ -117,7 +126,11 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShow24h(v: Boolean) = put { it[K.show24h] = v }
     suspend fun setUnits(v: SpeedUnits) = put { it[K.units] = v.name }
     suspend fun setMapPackage(v: String) = put { it[K.mapPackage] = v }
-    suspend fun setNavWindowed(v: Boolean) = put { it[K.navWindowed] = v }
+    suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
+    suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }
+    suspend fun setMapAutoStartDelay(sec: Int) = put {
+        it[K.mapAutoStartDelay] = sec.coerceIn(0, 60)
+    }
     suspend fun setHomePoint(lat: Double, lon: Double) = put {
         it[K.homeLat] = lat
         it[K.homeLon] = lon
@@ -154,6 +167,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSwcAdcMap(v: Map<Int, SwcAction>) = put { it[K.swcAdcMap] = encodeActions(v) }
 
     suspend fun setStartOnBoot(v: Boolean) = put { it[K.startOnBoot] = v }
+    suspend fun setStartOnScreenOn(v: Boolean) = put { it[K.startOnScreenOn] = v }
+    suspend fun setBeDefaultLauncher(v: Boolean) = put { it[K.beDefaultLauncher] = v }
     suspend fun setKeepScreenOn(v: Boolean) = put { it[K.keepScreenOn] = v }
 
     private suspend fun put(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
