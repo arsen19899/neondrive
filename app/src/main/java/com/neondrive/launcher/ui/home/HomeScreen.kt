@@ -17,10 +17,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.data.LauncherSettings
+import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.media.NowPlaying
 import com.neondrive.launcher.media.PlayerHub
+import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.ui.NeonScreen
 
 /**
@@ -59,6 +61,12 @@ fun HomeScreen(
     val canLike by PlayerHub.external.canLike.collectAsState()
     val connecting by PlayerHub.connectingYandex.collectAsState()
 
+    // Пока навигатор поднят «во фрейме», настоящее приложение уже стоит ровно там,
+    // где раньше была карта-обманка — панель карты больше не нужна, а освободившееся
+    // место отдаём приборам. Док с часами при этом сохраняет свой размер.
+    val navFrameActive by MapFrameController.active.collectAsState()
+    val mapCollapsed = navFrameActive && settings.mapMode == MapMode.FRAME
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val columnWidth = maxWidth * 0.25f
 
@@ -84,10 +92,12 @@ fun HomeScreen(
         ) {
             if (settings.sidebarSide == SidebarSide.LEFT) dock()
 
-            // Колонка приборов: спидометр сверху, плеер снизу
+            // Колонка приборов: спидометр сверху, плеер снизу.
+            // Когда навигатор занял место карты, колонка растягивается на всё
+            // освободившееся пространство вместо фиксированной четверти экрана.
             Column(
                 Modifier
-                    .width(columnWidth)
+                    .then(if (mapCollapsed) Modifier.weight(1f) else Modifier.width(columnWidth))
                     .fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -123,16 +133,19 @@ fun HomeScreen(
                 )
             }
 
-            // Карта — всё остальное пространство
-            MapPanel(
-                gps = gps,
-                settings = settings,
-                accent = accent,
-                accent2 = accent2,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            )
+            // Карта — всё остальное пространство. Пока настоящий навигатор поднят
+            // во фрейме, панель-заглушка не нужна: реальное окно уже стоит на её месте.
+            if (!mapCollapsed) {
+                MapPanel(
+                    gps = gps,
+                    settings = settings,
+                    accent = accent,
+                    accent2 = accent2,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+            }
 
             if (settings.sidebarSide == SidebarSide.RIGHT) dock()
         }
