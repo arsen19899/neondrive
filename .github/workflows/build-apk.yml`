@@ -1,0 +1,75 @@
+name: Сборка APK
+
+# Собирает APK на серверах GitHub — на вашем компьютере ничего ставить не нужно.
+# Запускается автоматически при загрузке файлов и вручную кнопкой «Run workflow».
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # нужно, чтобы приложить APK к релизу
+
+jobs:
+  build:
+    name: Собрать и опубликовать APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Забрать исходники
+        uses: actions/checkout@v4
+
+      - name: Java 17 (Android Gradle Plugin 8.x с JDK 11 не работает)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.9'
+
+      - name: Debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Release APK (подписан отладочным ключом — ставится сразу)
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Переименовать для удобства
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk       out/NeonDrive-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk   out/NeonDrive-release.apk || true
+          ls -lh out
+
+      - name: Артефакты сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonDrive-apk
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # Постоянная ссылка на APK — её удобно открыть прямо в браузере магнитолы.
+      # Если в настройках репозитория у Actions нет права на запись, шаг просто
+      # пропустится: APK всё равно останется в артефактах выше.
+      - name: Выложить в релиз «latest»
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true
+        with:
+          tag_name: latest
+          name: NeonDrive — последняя сборка
+          body: |
+            Автоматическая сборка из ветки `${{ github.ref_name }}`, коммит `${{ github.sha }}`.
+
+            **NeonDrive-release.apk** — обычная сборка, ставить эту.
+            **NeonDrive-debug.apk** — та же оболочка с отладочной информацией.
+
+            Установка: скачайте APK на головное устройство и откройте его файловым
+            менеджером. Затем «Настройки → Приложения по умолчанию → Главный экран» → NeonDrive.
+          files: out/*.apk
+          make_latest: true
