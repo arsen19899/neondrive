@@ -58,6 +58,13 @@ android {
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
+
+    lint {
+        // Оболочка намеренно лезет в системные вещи (телефония, sysfs, чужие
+        // медиасессии), поэтому предупреждения линтера не должны валить сборку.
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {

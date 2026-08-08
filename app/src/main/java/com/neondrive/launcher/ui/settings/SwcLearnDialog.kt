@@ -159,7 +159,7 @@ fun SwcLearnDialog(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                DialogButton("Отмена", Neon.TextLow, Modifier.weight(1f), onDismiss)
+                DialogButton("Отмена", Neon.TextLow, Modifier.weight(1f), onClick = onDismiss)
                 DialogButton("Очистить", accent, Modifier.weight(1f)) {
                     edit { repo ->
                         repo.setSwcShort(settings.swcShort.filterValues { it != action })
