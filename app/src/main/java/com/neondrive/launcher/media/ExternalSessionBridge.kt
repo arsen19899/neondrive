@@ -15,6 +15,7 @@ import com.neondrive.launcher.automation.NeonNotificationListener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Кнопка, которую отдаёт само приложение через свою медиасессию. */
 data class SessionAction(
@@ -312,18 +313,30 @@ class ExternalSessionBridge(private val context: Context) {
         return runCatching { context.startActivity(i) }.isSuccess
     }
 
+    /** Сколько ждать тихую попытку [SilentAppLauncher.wakeAndPlay], прежде чем считать её неудавшейся. */
+    private val SILENT_ATTEMPT_TIMEOUT_MS = 7000L
+
     /**
      * Поднять приложение и дождаться, пока оно создаст медиасессию — незаметно
-     * для пользователя, если это вообще возможно.
+     * для пользователя, если это вообще возможно, но с гарантией, что музыка
+     * заиграет так или иначе.
      *
-     * Сначала пробуем разбудить процесс через его MediaBrowserService (см.
-     * [SilentAppLauncher]) — так поддерживающие Android Auto приложения (Яндекс.Музыка
-     * в их числе) стартуют в фоне, никогда не показывая свой экран. Если такого
-     * сервиса нет или разбудить не удалось — только тогда открываем Activity
-     * напрямую, это единственный оставшийся способ получить сессию.
+     * Каскад надёжности в два звена:
+     *  1. Тихая попытка через [SilentAppLauncher.wakeAndPlay] — она не только
+     *     поднимает процесс через MediaBrowserService, но и сама шлёт команды play,
+     *     так что автовоспроизведение не зависит от того, создаст ли приложение
+     *     сессию само по себе. Ограничена по времени снаружи ([withTimeoutOrNull]),
+     *     чтобы зависший внутри неё опрос не мог заблокировать запуск музыки вовсе.
+     *  2. Если тихая попытка не подтвердила воспроизведение (нет сервиса, не
+     *     подключились, ни один из способов play не сработал) — без раздумий
+     *     открываем Activity напрямую. Это гарантированно работающий путь: он не
+     *     требует поддержки MediaBrowserService и не зависит от эвристик поиска
+     *     плеера в медиатеке.
      *
-     * Без ожидания появления сессии команда play уходит в пустоту: приложение ещё
-     * грузится, контроллера нет, и оболочка выглядит сломанной.
+     * Так «должна открываться в фоне и сразу работать» выполняется в подавляющем
+     * большинстве случаев тихим путём, а на случай, если конкретная версия
+     * приложения тихий путь не поддерживает, есть безусловный резерв — вместо
+     * того чтобы просто не заиграть.
      */
     suspend fun connect(pkg: String = PKG_YANDEX_MUSIC, timeoutMs: Long = 12_000): Boolean {
         if (!hasAccess()) return false
@@ -335,9 +348,16 @@ class ExternalSessionBridge(private val context: Context) {
         }
 
         if (!isRunning(pkg)) {
-            val wokeSilently = SilentAppLauncher.wake(context, pkg)
-            lastConnectWasVisible = !wokeSilently
-            if (!wokeSilently) launchApp(pkg)
+            val silentlyPlaying = runCatching {
+                withTimeoutOrNull(SILENT_ATTEMPT_TIMEOUT_MS) { SilentAppLauncher.wakeAndPlay(context, pkg) }
+            }.getOrNull() == true
+
+            if (silentlyPlaying) {
+                lastConnectWasVisible = false
+            } else {
+                lastConnectWasVisible = true
+                launchApp(pkg)
+            }
         } else {
             lastConnectWasVisible = false
         }

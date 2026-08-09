@@ -23,16 +23,16 @@ data class FuelState(
  * Расстояние до ближайшей заправки — по дорогам, а не по прямой.
  *
  * Механизм в два шага, оба через открытые бесплатные сервисы без ключей:
- *  1. Overpass API (зеркало OpenStreetMap) — ищем узлы amenity=fuel в радиусе
+ *  1. Overpass API (сеть зеркал OpenStreetMap) — ищем узлы amenity=fuel в радиусе
  *     вокруг текущей точки. Возвращает и координаты, и (если есть) название.
  *  2. Из ближайших по прямой кандидатов (не больше 5 — гонять роутинг по всем
  *     дорого) через OSRM считаем настоящее расстояние по дорогам и берём минимум.
  *     Это и есть требование «не по прямой, а как реально ехать».
  *
- * Оба сервиса — публичные демо-инстансы (overpass-api.de, router.project-osrm.org).
- * Для одиночного головного устройства с редкими запросами (раз в несколько минут
- * или километров) этого достаточно; при желании поставить более надёжный источник —
- * это единственное место в коде, которое нужно поменять (см. [FuelStationApi]).
+ * Публичные демо-сервисы отваливаются поодиночке (перегрузка, временная
+ * недоступность) — поэтому у каждого шага есть несколько независимых зеркал,
+ * перебираемых по очереди, плюс повтор с расширенным радиусом поиска, если по
+ * умолчанию рядом ничего не нашлось. См. подробности в [FuelStationApi].
  */
 object FuelStationHub {
 
@@ -61,7 +61,11 @@ object FuelStationHub {
                     Location.distanceBetween(gps.lastLat, gps.lastLon, lastQueryLat, lastQueryLon, out)
                     out[0]
                 }
-                val due = System.currentTimeMillis() - lastQueryAt > MIN_INTERVAL_MS
+                // Повторяем чаще, пока не получили вообще ни одного результата —
+                // не ждать же 4 минуты до следующей попытки, если первая просто
+                // не достучалась до сервиса.
+                val retryInterval = if (_state.value.distanceKm == null) 45_000L else MIN_INTERVAL_MS
+                val due = System.currentTimeMillis() - lastQueryAt > retryInterval
                 if (lastQueryAt == 0L || due || moved > MIN_MOVE_M) {
                     lastQueryAt = System.currentTimeMillis()
                     lastQueryLat = gps.lastLat
@@ -70,6 +74,13 @@ object FuelStationHub {
                 }
             }
         }
+    }
+
+    /** Принудительно повторить запрос прямо сейчас (например, по кнопке в UI). */
+    fun refreshNow() {
+        if (!started || lastQueryLat.isNaN()) return
+        lastQueryAt = System.currentTimeMillis()
+        query(lastQueryLat, lastQueryLon)
     }
 
     private fun query(lat: Double, lon: Double) {
@@ -97,12 +108,31 @@ object FuelStationApi {
     data class Nearest(val name: String, val distanceKm: Float)
     private data class Node(val lat: Double, val lon: Double, val name: String)
 
-    private const val OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-    private const val OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
+    // Несколько независимых зеркал Overpass — публичные инстансы время от времени
+    // перегружены или недоступны поодиночке, перебор по очереди резко поднимает
+    // шанс получить ответ хоть от одного.
+    private val OVERPASS_MIRRORS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    )
+
+    // Аналогично — основной публичный роутер OSRM и запасной инстанс.
+    private val OSRM_MIRRORS = listOf(
+        "https://router.project-osrm.org/route/v1/driving",
+        "https://routing.openstreetmap.de/routed-car/route/v1/driving"
+    )
+
+    private const val USER_AGENT = "NeonDrive-CarLauncher/1.2 (+https://github.com/)"
 
     /** [radiusM] — насколько широко искать АЗС вокруг точки, метры. */
     fun findNearest(lat: Double, lon: Double, radiusM: Int = 15000): Nearest? {
-        val candidates = queryOverpass(lat, lon, radiusM) ?: return null
+        // Сначала обычный радиус, и только если совсем ничего не нашлось —
+        // расширяем: в глухих местах 15 км может быть мало.
+        val candidates = queryOverpassAnyMirror(lat, lon, radiusM)
+            ?: queryOverpassAnyMirror(lat, lon, radiusM * 3)
+            ?: return null
         if (candidates.isEmpty()) return null
 
         // Роутинг по всем найденным станциям — дорого и медленно. Берём 5 ближайших
@@ -113,29 +143,43 @@ object FuelStationApi {
 
         var best: Nearest? = null
         for (c in shortlisted) {
-            val km = routeDistanceKm(lat, lon, c.lat, c.lon) ?: continue
+            val km = routeDistanceKmAnyMirror(lat, lon, c.lat, c.lon) ?: continue
             if (best == null || km < best.distanceKm) {
                 best = Nearest(c.name.ifBlank { "АЗС" }, km)
             }
         }
-        // OSRM недоступен — честно откатываемся на «по прямой», это не то же самое,
-        // но лучше молчания.
+        // Ни один роутер не ответил — честно откатываемся на «по прямой», это не
+        // то же самое, но лучше молчания.
         return best ?: shortlisted.firstOrNull()?.let {
             Nearest(it.name.ifBlank { "АЗС" }, straightLineM(lat, lon, it.lat, it.lon) / 1000f)
         }
     }
 
-    private fun queryOverpass(lat: Double, lon: Double, radiusM: Int): List<Node>? {
+    private fun queryOverpassAnyMirror(lat: Double, lon: Double, radiusM: Int): List<Node>? {
+        for (mirror in OVERPASS_MIRRORS) {
+            val result = queryOverpass(mirror, lat, lon, radiusM)
+            if (result != null && result.isNotEmpty()) return result
+        }
+        return null
+    }
+
+    private fun queryOverpass(baseUrl: String, lat: Double, lon: Double, radiusM: Int): List<Node>? {
         val query = "[out:json][timeout:15];node[\"amenity\"=\"fuel\"](around:$radiusM,$lat,$lon);out body 30;"
         return runCatching {
-            val conn = java.net.URL(OVERPASS_URL).openConnection() as java.net.HttpURLConnection
+            val conn = java.net.URL(baseUrl).openConnection() as java.net.HttpURLConnection
             conn.requestMethod = "POST"
             conn.doOutput = true
-            conn.connectTimeout = 8000
+            conn.connectTimeout = 7000
             conn.readTimeout = 12000
             conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
             conn.outputStream.use {
                 it.write(("data=" + java.net.URLEncoder.encode(query, "UTF-8")).toByteArray())
+            }
+            if (conn.responseCode !in 200..299) {
+                conn.disconnect()
+                return@runCatching null
             }
             val text = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
@@ -151,16 +195,30 @@ object FuelStationApi {
         }.getOrNull()
     }
 
-    private fun routeDistanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float? {
+    private fun routeDistanceKmAnyMirror(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float? {
+        for (mirror in OSRM_MIRRORS) {
+            val km = routeDistanceKm(mirror, lat1, lon1, lat2, lon2)
+            if (km != null) return km
+        }
+        return null
+    }
+
+    private fun routeDistanceKm(baseUrl: String, lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float? {
         return runCatching {
-            val url = "$OSRM_URL/$lon1,$lat1;$lon2,$lat2?overview=false"
+            val url = "$baseUrl/$lon1,$lat1;$lon2,$lat2?overview=false"
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 6000
             conn.readTimeout = 8000
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
+            if (conn.responseCode !in 200..299) {
+                conn.disconnect()
+                return@runCatching null
+            }
             val text = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
             val routes = JSONObject(text).getJSONArray("routes")
-            if (routes.length() == 0) return null
+            if (routes.length() == 0) return@runCatching null
             (routes.getJSONObject(0).getDouble("distance") / 1000.0).toFloat()
         }.getOrNull()
     }
