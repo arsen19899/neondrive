@@ -96,14 +96,18 @@ fun NeonBackdrop(
     animated: Boolean = true,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val transition = rememberInfiniteTransition(label = "backdrop")
-    val drift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(14000), RepeatMode.Reverse),
-        label = "drift"
-    )
-    val t = if (animated) drift else 0.5f
+    // Раньше infiniteTransition крутился всегда, даже когда результат отбрасывался
+    // (animated = false) — на слабых ГУ это лишняя перерисовка каждый кадр вхолостую.
+    val t = if (animated) {
+        val transition = rememberInfiniteTransition(label = "backdrop")
+        val drift by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(14000), RepeatMode.Reverse),
+            label = "drift"
+        )
+        drift
+    } else 0.5f
 
     Box(
         Modifier

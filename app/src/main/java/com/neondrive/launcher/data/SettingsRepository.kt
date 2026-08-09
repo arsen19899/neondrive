@@ -29,6 +29,8 @@ class SettingsRepository(private val context: Context) {
         val show24h = booleanPreferencesKey("show_24h")
         val units = stringPreferencesKey("units")
         val mapPackage = stringPreferencesKey("map_package")
+        val showSpeedometer = booleanPreferencesKey("show_speedometer")
+        val reducedEffects = booleanPreferencesKey("reduced_effects")
         val customStations = stringPreferencesKey("custom_stations")
         val mapMode = stringPreferencesKey("map_mode")
         val mapAutoStart = booleanPreferencesKey("map_auto_start")
@@ -77,6 +79,8 @@ class SettingsRepository(private val context: Context) {
             show24h = p[K.show24h] ?: d.show24h,
             units = p[K.units]?.let { runCatching { SpeedUnits.valueOf(it) }.getOrNull() } ?: d.units,
             mapPackage = p[K.mapPackage] ?: d.mapPackage,
+            showSpeedometer = p[K.showSpeedometer] ?: d.showSpeedometer,
+            reducedEffects = p[K.reducedEffects] ?: d.reducedEffects,
             customStations = p[K.customStations]?.let(::decodeStations) ?: d.customStations,
             mapMode = p[K.mapMode]?.let { runCatching { MapMode.valueOf(it) }.getOrNull() }
                 ?: d.mapMode,
@@ -129,6 +133,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShow24h(v: Boolean) = put { it[K.show24h] = v }
     suspend fun setUnits(v: SpeedUnits) = put { it[K.units] = v.name }
     suspend fun setMapPackage(v: String) = put { it[K.mapPackage] = v }
+    suspend fun setShowSpeedometer(v: Boolean) = put { it[K.showSpeedometer] = v }
+    suspend fun setReducedEffects(v: Boolean) = put { it[K.reducedEffects] = v }
     suspend fun setCustomStations(v: List<RadioStation>) = put { it[K.customStations] = encodeStations(v) }
     suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
     suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }

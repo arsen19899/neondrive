@@ -101,16 +101,18 @@ fun HomeScreen(
                     .fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                SpeedoPanel(
-                    gps = gps,
-                    units = settings.units,
-                    accent = accent,
-                    accent2 = accent2,
-                    speedGainPercent = speedGainPercent,
-                    modifier = Modifier.fillMaxWidth(),
-                    speedSteps = if (settings.speedVolumeEnabled) settings.speedSteps
-                    else emptyList()
-                )
+                if (settings.showSpeedometer) {
+                    SpeedoPanel(
+                        gps = gps,
+                        units = settings.units,
+                        accent = accent,
+                        accent2 = accent2,
+                        speedGainPercent = speedGainPercent,
+                        modifier = Modifier.fillMaxWidth(),
+                        speedSteps = if (settings.speedVolumeEnabled) settings.speedSteps
+                        else emptyList()
+                    )
+                }
                 PlayerPanel(
                     now = now,
                     source = source,

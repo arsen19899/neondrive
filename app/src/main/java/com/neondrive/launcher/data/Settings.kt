@@ -107,6 +107,10 @@ data class LauncherSettings(
     val show24h: Boolean = true,
     val units: SpeedUnits = SpeedUnits.KMH,
     val mapPackage: String = "ru.yandex.yandexnavi",
+    /** Показывать спидометр на рабочем столе; при выключении плеер занимает его место. */
+    val showSpeedometer: Boolean = true,
+    /** Упрощённая графика — меньше фоновых анимаций для слабых ГУ. */
+    val reducedEffects: Boolean = false,
 
     /* Радиостанции, сохранённые пользователем поиском (см. вкладку «Поиск» в Музыке) */
     val customStations: List<RadioStation> = emptyList(),

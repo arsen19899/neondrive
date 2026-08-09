@@ -59,6 +59,9 @@ data class NeonPalette(
 
 val LocalNeon = staticCompositionLocalOf { NeonPalette(Neon.Cyan, Neon.Magenta) }
 
+/** «Упрощённая графика» из настроек — гасит декоративные бесконечные анимации на слабых ГУ. */
+val LocalReducedEffects = staticCompositionLocalOf { false }
+
 /* ─────────────────────────  ТИПОГРАФИКА  ───────────────────────── */
 
 private val NeonTypography = Typography(
@@ -96,6 +99,7 @@ private val NeonTypography = Typography(
 @Composable
 fun NeonDriveTheme(
     accent: NeonAccent = NeonAccent.CYAN,
+    reducedEffects: Boolean = false,
     @Suppress("UNUSED_PARAMETER") darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
@@ -114,7 +118,7 @@ fun NeonDriveTheme(
         error = Neon.Red
     )
 
-    CompositionLocalProvider(LocalNeon provides palette) {
+    CompositionLocalProvider(LocalNeon provides palette, LocalReducedEffects provides reducedEffects) {
         MaterialTheme(
             colorScheme = scheme,
             typography = NeonTypography,

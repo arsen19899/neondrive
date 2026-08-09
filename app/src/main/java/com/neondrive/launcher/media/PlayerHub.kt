@@ -10,6 +10,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.neondrive.launcher.MainActivity
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -285,11 +286,16 @@ object PlayerHub {
                 return@launch
             }
             _connectingYandex.value = true
+            val wasRunning = external.isRunning()
             try {
                 val connected = if (launchApp) external.connect() else {
                     external.refresh(); external.available.value
                 }
                 if (connected) {
+                    // Приложению пришлось открыться, чтобы создать медиасессию — как только
+                    // трек подхватен, забираем фокус обратно себе: пользователь остаётся
+                    // в оболочке и слушает через наш мини-плеер, а не смотрит в чужой UI.
+                    if (launchApp && !wasRunning) returnToLauncher()
                     if (autoPlay && !external.now.value.isPlaying) {
                         delay(600)
                         external.play()
@@ -308,6 +314,19 @@ object PlayerHub {
 
     fun openYandexMusic() {
         external.launchApp()
+    }
+
+    /** Вернуть фокус оболочке поверх только что открывшегося стороннего плеера. */
+    private fun returnToLauncher() {
+        runCatching {
+            appContext.startActivity(
+                Intent(appContext, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
+            )
+        }
     }
 
     /** Лайк текущего трека в стороннем приложении. */

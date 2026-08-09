@@ -23,18 +23,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,6 +54,7 @@ import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.data.SpeedUnits
 import com.neondrive.launcher.data.SpeedVolumeStep
 import com.neondrive.launcher.data.SwcAction
+import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.overlay.NeonOverlayService
@@ -65,12 +70,14 @@ import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.neonGlow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 typealias SettingsEdit = (suspend (SettingsRepository) -> Unit) -> Unit
 
 private enum class Tab(val title: String) {
     NAV("Навигация"),
     MUSIC("Музыка"),
+    RADIO("Радио"),
     REACTIONS("Реакции"),
     SPEED("Скорость"),
     WHEEL("Кнопки руля"),
@@ -139,6 +146,7 @@ fun SettingsScreen(
                     when (tab) {
                         Tab.NAV -> NavTab(settings, accent, accent2, edit)
                         Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
+                        Tab.RADIO -> RadioTab(accent, accent2)
                         Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
                         Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
                         Tab.WHEEL -> WheelTab(settings, accent, accent2, edit)
@@ -223,6 +231,108 @@ private fun MusicTab(s: LauncherSettings, accent: Color, accent2: Color, edit: S
                 )
             }
         }
+    }
+}
+
+/* ═════════════════════  РАДИО  ═════════════════════ */
+
+@Composable
+private fun RadioTab(accent: Color, accent2: Color) {
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    val stations by PlayerHub.stations.collectAsState()
+    val results by PlayerHub.stationSearch.collectAsState()
+    val searching by PlayerHub.searching.collectAsState()
+
+    fun runSearch() {
+        scope.launch { PlayerHub.searchStations(query) }
+    }
+
+    Column {
+        SettingsSection("Сохранённые станции", accent) {
+            if (stations.isEmpty()) {
+                Hint("Станций пока нет — найдите их ниже и сохраните.", accent2)
+            } else {
+                stations.forEach { st ->
+                    SettingRow(
+                        st.name,
+                        listOf(st.genre, if (st.builtIn) "предустановлена" else "своя")
+                            .filter { it.isNotBlank() }.joinToString(" · "),
+                        accent
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SmallButton("Играть", accent2) { PlayerHub.playStation(st) }
+                            if (!st.builtIn) {
+                                SmallButton("Удалить", Neon.Red) { PlayerHub.removeStation(st.id) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        SettingsSection("Поиск станций", accent2) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x330C1424))
+                        .border(1.dp, accent2.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    if (query.isEmpty()) {
+                        Text("Название, жанр, город…", color = Neon.TextLow, fontSize = 13.sp)
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Neon.TextHi, fontSize = 13.sp),
+                        cursorBrush = SolidColor(accent2),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                SmallButton("Найти", accent2) { runSearch() }
+            }
+
+            when {
+                searching -> Hint("Ищем…", accent2)
+                results.isEmpty() && query.isNotBlank() -> Hint(
+                    "Ничего не найдено. Проверьте название или интернет-соединение.", accent2
+                )
+                results.isEmpty() -> Unit
+                else -> results.forEach { r ->
+                    val saved = stations.any { it.streamUrl == r.streamUrl }
+                    SettingRow(
+                        r.name,
+                        listOf(r.genre, r.country).filter { it.isNotBlank() }.joinToString(" · "),
+                        accent
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SmallButton("Играть", accent2) { PlayerHub.saveAndPlayStation(r) }
+                            SmallButton(
+                                if (saved) "Сохранено" else "Сохранить",
+                                if (saved) Neon.TextLow else accent2
+                            ) { if (!saved) PlayerHub.saveStation(r) }
+                        }
+                    }
+                }
+            }
+        }
+
+        Hint(
+            "Каталог станций — открытый сервис radio-browser.info, ключ не нужен. " +
+                "Сохранённые станции переживают перезапуск оболочки и листаются кнопками " +
+                "⏮/⏭ прямо в мини-плеере на рабочем столе.",
+            accent2
+        )
     }
 }
 
@@ -607,9 +717,25 @@ private fun LookTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Se
                     edit { it.setAnimatedBackground(v) }
                 }
             }
+            SettingRow(
+                "Упрощённая графика",
+                "Отключает декоративные бесконечные анимации (фон, HUD карты, спектр " +
+                    "плеера) — заметно снижает нагрузку на слабых головных устройствах",
+                accent
+            ) {
+                NeonToggle(s.reducedEffects, accent) { v -> edit { it.setReducedEffects(v) } }
+            }
         }
 
         SettingsSection("Раскладка", accent2) {
+            SettingRow(
+                "Спидометр на рабочем столе",
+                if (s.showSpeedometer) "Показан над плеером"
+                else "Скрыт — плеер занимает всю колонку приборов",
+                accent2
+            ) {
+                NeonToggle(s.showSpeedometer, accent2) { v -> edit { it.setShowSpeedometer(v) } }
+            }
             SettingRow("Сторона бокового меню", "Под правый или левый руль", accent2) {
                 NeonSegmented(
                     options = SidebarSide.entries.toList(),
@@ -817,9 +943,10 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
             }
 
             SettingRow(
-                "Запускать при пробуждении",
-                "При каждом включении экрана оболочка выходит на передний план. " +
-                    "Работает, когда NeonDrive назначен домашним экраном",
+                "Всегда открывать оболочку поверх",
+                "При включении экрана, пробуждении, подаче питания (зажигание) и загрузке " +
+                    "системы NeonDrive сам выходит на передний план. Работает, когда " +
+                    "оболочка назначена домашним экраном",
                 accent
             ) {
                 NeonToggle(s.startOnScreenOn, accent) { v -> edit { it.setStartOnScreenOn(v) } }

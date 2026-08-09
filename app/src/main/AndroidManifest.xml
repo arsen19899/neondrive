@@ -58,6 +58,7 @@
         android:supportsRtl="false"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.NeonDrive">
 
         <!-- ГЛАВНЫЙ ЭКРАН: полноценная замена рабочего стола ГУ -->
@@ -139,6 +140,16 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Подача питания (зажигание) — оболочка выходит на передний план так же,
+             как при пробуждении экрана -->
+        <receiver
+            android:name=".automation.PowerConnectedReceiver"
+            android:exported="true">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
             </intent-filter>
         </receiver>
 

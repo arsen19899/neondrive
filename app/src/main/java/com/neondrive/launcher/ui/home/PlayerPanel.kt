@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -223,7 +224,10 @@ fun PlayerPanel(
                     SpectrumLine(active = now.isPlaying, accent = accent2)
                 }
 
-                Spacer(Modifier.height(10.dp))
+                // Карточка часто выше, чем нужно её содержимому (плеер занимает всё
+                // свободное место в колонке) — гибкий отступ прижимает транспорт
+                // книзу, а не оставляет пустоту под спектром.
+                Spacer(Modifier.weight(1f).heightIn(min = 10.dp))
 
                 // Громкость регулируется физическими кнопками магнитолы — здесь только транспорт
                 Row(
@@ -283,14 +287,22 @@ private fun ProgressLine(fraction: Float, accent: Color) {
     }
 }
 
-/** Живая «гребёнка» спектра — чисто декоративная, но оживляет радио. */
+/**
+ * Живая «гребёнка» спектра — чисто декоративная, но оживляет радио.
+ * Анимация запускается только пока играет музыка: бесконечный transition сам по
+ * себе гоняет перерисовку на 60 fps вечно, даже показывая статичную линию —
+ * на слабом ГУ это заметная лишняя нагрузка вхолостую.
+ */
 @Composable
 private fun SpectrumLine(active: Boolean, accent: Color) {
-    val tr = rememberInfiniteTransition(label = "spectrum")
-    val phase by tr.animateFloat(
-        0f, (Math.PI * 2).toFloat(),
-        infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "phase"
-    )
+    val phase = if (active) {
+        val tr = rememberInfiniteTransition(label = "spectrum")
+        val p by tr.animateFloat(
+            0f, (Math.PI * 2).toFloat(),
+            infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "phase"
+        )
+        p
+    } else 0f
     Canvas(
         Modifier
             .fillMaxWidth()

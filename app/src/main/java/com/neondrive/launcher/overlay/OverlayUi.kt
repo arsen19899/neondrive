@@ -85,7 +85,7 @@ fun OverlayColumn(
         }
     }
 
-    NeonDriveTheme(accent = accentSpec) {
+    NeonDriveTheme(accent = accentSpec, reducedEffects = settings.reducedEffects) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -146,7 +146,7 @@ fun OverlayDock(
     val now by PlayerHub.now.collectAsState()
     val context = LocalContext.current
 
-    NeonDriveTheme(accent = accentSpec) {
+    NeonDriveTheme(accent = accentSpec, reducedEffects = settings.reducedEffects) {
         Box(
             Modifier
                 .fillMaxSize()

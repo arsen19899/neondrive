@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // Тема живёт от настроек, поэтому читаем их прямо здесь
             val s by repo.settings.collectAsState(initial = LauncherSettings())
-            NeonDriveTheme(accent = NeonAccent.fromName(s.accent)) {
+            NeonDriveTheme(accent = NeonAccent.fromName(s.accent), reducedEffects = s.reducedEffects) {
                 NeonRoot(repo = repo, startScreen = start)
             }
         }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Многие бесплатные интернет-радиостанции (в том числе из поиска radio-browser.info)
+    отдают поток по обычному http://, а не https://. Начиная с Android 9 (API 28)
+    система по умолчанию блокирует cleartext-соединения для приложений с
+    targetSdkVersion 28+, и ExoPlayer молча не может подключиться к такому потоку.
+    Разрешаем cleartext глобально — иначе часть сохранённых/найденных станций
+    просто не заиграет.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -82,7 +82,7 @@ fun NeonRoot(
         }
     }
 
-    NeonBackdrop(accent, accent2, animated = settings.animatedBackground) {
+    NeonBackdrop(accent, accent2, animated = settings.animatedBackground && !settings.reducedEffects) {
         AnimatedContent(
             targetState = screen,
             transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },

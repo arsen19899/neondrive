@@ -262,17 +262,27 @@ private fun QuickChip(
 /** Стилизованная карта-HUD: сетка кварталов, магистраль, маркер машины. */
 @Composable
 private fun MapCanvas(accent: Color, accent2: Color, moving: Boolean) {
-    val tr = rememberInfiniteTransition(label = "map")
-    val scroll by tr.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(if (moving) 5200 else 16000), RepeatMode.Restart),
-        label = "scroll"
-    )
-    val pulse by tr.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(1800), RepeatMode.Reverse),
-        label = "pulse"
-    )
+    // «Упрощённая графика» останавливает декоративный дрейф и пульсацию —
+    // это чисто фоновая заглушка, ей не обязательно гонять перерисовку вечно.
+    val reduced = com.neondrive.launcher.ui.theme.LocalReducedEffects.current
+    val scroll: Float
+    val pulse: Float
+    if (reduced) {
+        scroll = 0f
+        pulse = 0.5f
+    } else {
+        val tr = rememberInfiniteTransition(label = "map")
+        scroll = tr.animateFloat(
+            0f, 1f,
+            infiniteRepeatable(tween(if (moving) 5200 else 16000), RepeatMode.Restart),
+            label = "scroll"
+        ).value
+        pulse = tr.animateFloat(
+            0f, 1f,
+            infiniteRepeatable(tween(1800), RepeatMode.Reverse),
+            label = "pulse"
+        ).value
+    }
 
     Canvas(
         Modifier
