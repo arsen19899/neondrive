@@ -22,6 +22,15 @@ data class RadioStation(
     val builtIn: Boolean = true
 )
 
+/** Обычная FM-станция, принимаемая через антенну ГУ, а не по интернету. */
+data class FmStation(
+    val frequencyKHz: Int,
+    val name: String
+) {
+    val mhz: Float get() = frequencyKHz / 1000f
+    val label: String get() = name.ifBlank { "%.1f МГц".format(mhz) }
+}
+
 /** То, что видит UI, независимо от источника (свой ExoPlayer или чужая MediaSession). */
 data class NowPlaying(
     val title: String = "Нет воспроизведения",

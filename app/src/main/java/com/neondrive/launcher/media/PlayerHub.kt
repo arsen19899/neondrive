@@ -12,6 +12,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.neondrive.launcher.MainActivity
 import com.neondrive.launcher.data.MusicSource
+import com.neondrive.launcher.data.RadioMode
 import com.neondrive.launcher.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,14 @@ object PlayerHub {
     private val _stations = MutableStateFlow(RadioPresets.default)
     val stations: StateFlow<List<RadioStation>> = _stations
 
+    private val _fmStations = MutableStateFlow<List<FmStation>>(emptyList())
+    val fmStations: StateFlow<List<FmStation>> = _fmStations
+
+    private val _radioMode = MutableStateFlow(RadioMode.INTERNET)
+    val radioMode: StateFlow<RadioMode> = _radioMode
+
+    private var currentFmFreq: Int? = null
+
     private val _now = MutableStateFlow(NowPlaying())
     val now: StateFlow<NowPlaying> = _now
 
@@ -70,12 +79,15 @@ object PlayerHub {
         appContext = context.applicationContext
         external = ExternalSessionBridge(appContext)
         settingsRepo = SettingsRepository(appContext)
+        FmRadioController.init(appContext)
 
-        // Станции, сохранённые пользователем через поиск, подмешиваем к пресетам
+        // Станции интернет-радио, сохранённые поиском, FM-станции и выбранный режим
+        // радио подтягиваем из настроек один раз при старте.
         scope.launch {
-            val custom = runCatching { settingsRepo.settings.first().customStations }
-                .getOrDefault(emptyList())
-            if (custom.isNotEmpty()) _stations.value = RadioPresets.default + custom
+            val s = runCatching { settingsRepo.settings.first() }.getOrNull() ?: return@launch
+            if (s.customStations.isNotEmpty()) _stations.value = RadioPresets.default + s.customStations
+            _fmStations.value = s.fmStations
+            _radioMode.value = s.radioMode
         }
 
         val token = SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
@@ -111,20 +123,25 @@ object PlayerHub {
     private suspend fun tick() {
         while (true) {
             delay(500)
-            if (_source.value == MusicSource.YANDEX) {
-                external.refresh()
-                // Пока идёт подключение, в _now лежит служебное сообщение — не затираем
-                if (!_connectingYandex.value && external.available.value) {
-                    _now.value = external.now.value
+            when {
+                _source.value == MusicSource.YANDEX -> {
+                    external.refresh()
+                    // Пока идёт подключение, в _now лежит служебное сообщение — не затираем
+                    if (!_connectingYandex.value && external.available.value) {
+                        _now.value = external.now.value
+                    }
                 }
-            } else {
-                pushNow()
+                // FM: опрашивать нечего — тюнер это не MediaSession, _now выставлен
+                // напрямую в playFmStation и не должен затираться контроллером.
+                _source.value == MusicSource.RADIO && _radioMode.value == RadioMode.FM -> Unit
+                else -> pushNow()
             }
         }
     }
 
     private fun pushNow() {
         if (_source.value == MusicSource.YANDEX) return
+        if (_source.value == MusicSource.RADIO && _radioMode.value == RadioMode.FM) return
         val c = controller ?: return
         val md = c.mediaMetadata
         _now.value = NowPlaying(
@@ -161,6 +178,69 @@ object PlayerHub {
     private fun persistCustomStations() {
         val custom = _stations.value.filterNot { it.builtIn }
         scope.launch { runCatching { settingsRepo.setCustomStations(custom) } }
+    }
+
+    /* ─────────────────  FM-РАДИО  ───────────────── */
+
+    fun addFmStation(station: FmStation) {
+        if (_fmStations.value.any { it.frequencyKHz == station.frequencyKHz }) return
+        _fmStations.value = (_fmStations.value + station).sortedBy { it.frequencyKHz }
+        persistFmStations()
+    }
+
+    fun removeFmStation(frequencyKHz: Int) {
+        _fmStations.value = _fmStations.value.filterNot { it.frequencyKHz == frequencyKHz }
+        persistFmStations()
+    }
+
+    private fun persistFmStations() {
+        scope.launch { runCatching { settingsRepo.setFmStations(_fmStations.value) } }
+    }
+
+    fun setRadioMode(mode: RadioMode) {
+        if (_radioMode.value == mode) return
+        _radioMode.value = mode
+        scope.launch { runCatching { settingsRepo.setRadioMode(mode) } }
+    }
+
+    /**
+     * Открыть заводское радио-приложение ГУ, если оно есть — единственное реальное
+     * управление тюнером, доступное стороннему приложению без системных прав
+     * (см. подробности в [FmRadioController]). Возвращает false, если такого
+     * приложения на устройстве не нашлось.
+     */
+    fun openFactoryRadioApp(): Boolean = FmRadioController.openFactoryApp(appContext)
+
+    /**
+     * Выбрать FM-станцию как «текущую» справочно — настроиться на неё физически
+     * нужно самой магнитолой (кнопками ГУ или заводским радио-приложением, см.
+     * [openFactoryRadioApp]). Программно передать частоту тюнеру сторонний apk
+     * не может — это ограничение системы разрешений Android, а не оболочки.
+     */
+    fun playFmStation(station: FmStation) {
+        setRadioMode(RadioMode.FM)
+        _source.value = MusicSource.RADIO
+        currentFmFreq = station.frequencyKHz
+        _now.value = NowPlaying(
+            title = station.label,
+            subtitle = "%.1f МГц · настройтесь на магнитоле".format(station.mhz),
+            isPlaying = false,
+            sourceLabel = "FM радио"
+        )
+    }
+
+    private fun nextFmStation() {
+        val list = _fmStations.value
+        if (list.isEmpty()) return
+        val i = list.indexOfFirst { it.frequencyKHz == currentFmFreq }
+        playFmStation(list[(i + 1).mod(list.size)])
+    }
+
+    private fun prevFmStation() {
+        val list = _fmStations.value
+        if (list.isEmpty()) return
+        val i = list.indexOfFirst { it.frequencyKHz == currentFmFreq }
+        playFmStation(list[(if (i < 0) 0 else i - 1).mod(list.size)])
     }
 
     /** Поиск станций в публичном каталоге radio-browser.info (см. [RadioBrowserApi]). */
@@ -241,6 +321,7 @@ object PlayerHub {
 
     fun playStation(station: RadioStation) {
         val c = controller ?: return
+        setRadioMode(RadioMode.INTERNET)
         _source.value = MusicSource.RADIO
         c.setMediaItem(
             MediaItem.Builder()
@@ -286,16 +367,18 @@ object PlayerHub {
                 return@launch
             }
             _connectingYandex.value = true
-            val wasRunning = external.isRunning()
             try {
                 val connected = if (launchApp) external.connect() else {
                     external.refresh(); external.available.value
                 }
                 if (connected) {
-                    // Приложению пришлось открыться, чтобы создать медиасессию — как только
-                    // трек подхватен, забираем фокус обратно себе: пользователь остаётся
-                    // в оболочке и слушает через наш мини-плеер, а не смотрит в чужой UI.
-                    if (launchApp && !wasRunning) returnToLauncher()
+                    // Разбудить приложение тихо (через MediaBrowserService) обычно
+                    // получается — тогда экран пользователь вообще не видел, и
+                    // возвращать фокус не нужно, оболочка и так всё время была видна.
+                    // Если же пришлось честно открыть Activity — забираем фокус
+                    // обратно немедленно, чтобы вспышка чужого интерфейса была
+                    // как можно короче.
+                    if (launchApp && external.lastConnectWasVisible) returnToLauncher()
                     if (autoPlay && !external.now.value.isPlaying) {
                         delay(600)
                         external.play()
@@ -323,7 +406,11 @@ object PlayerHub {
                 Intent(appContext, MainActivity::class.java).addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                        // Без анимации — вместе с FLAG_ACTIVITY_NO_ANIMATION на запуске
+                        // стороннего приложения (ExternalSessionBridge.launchApp) это
+                        // минимизирует видимую вспышку чужого интерфейса.
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION
                 )
             )
         }
@@ -336,30 +423,39 @@ object PlayerHub {
 
     /* ─────────────────  ТРАНСПОРТ  ───────────────── */
 
-    fun playPause() = when (_source.value) {
-        MusicSource.YANDEX -> external.toggle()
+    private val isFm: Boolean get() = _source.value == MusicSource.RADIO && _radioMode.value == RadioMode.FM
+
+    fun playPause() = when {
+        _source.value == MusicSource.YANDEX -> external.toggle()
+        isFm -> if (_now.value.isPlaying) pause() else play()
         else -> controller?.let { if (it.isPlaying) it.pause() else resumeOrStart() } ?: Unit
     }
 
-    fun play() = when (_source.value) {
-        MusicSource.YANDEX -> external.play()
+    // Для FM это чисто отметка «слушаю»/«не слушаю» в интерфейсе — реальным
+    // воспроизведением сторонний apk управлять не может (см. FmRadioController).
+    fun play() = when {
+        _source.value == MusicSource.YANDEX -> external.play()
+        isFm -> _now.value = _now.value.copy(isPlaying = true)
         else -> resumeOrStart()
     }
 
-    fun pause() = when (_source.value) {
-        MusicSource.YANDEX -> external.pause()
+    fun pause() = when {
+        _source.value == MusicSource.YANDEX -> external.pause()
+        isFm -> _now.value = _now.value.copy(isPlaying = false)
         else -> controller?.pause() ?: Unit
     }
 
-    fun next() = when (_source.value) {
-        MusicSource.YANDEX -> external.next()
-        MusicSource.RADIO -> nextStation()
+    fun next() = when {
+        _source.value == MusicSource.YANDEX -> external.next()
+        isFm -> nextFmStation()
+        _source.value == MusicSource.RADIO -> nextStation()
         else -> controller?.seekToNextMediaItem() ?: Unit
     }
 
-    fun prev() = when (_source.value) {
-        MusicSource.YANDEX -> external.prev()
-        MusicSource.RADIO -> prevStation()
+    fun prev() = when {
+        _source.value == MusicSource.YANDEX -> external.prev()
+        isFm -> prevFmStation()
+        _source.value == MusicSource.RADIO -> prevStation()
         else -> controller?.seekToPreviousMediaItem() ?: Unit
     }
 

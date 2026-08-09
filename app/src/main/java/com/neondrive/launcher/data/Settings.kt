@@ -1,5 +1,6 @@
 package com.neondrive.launcher.data
 
+import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.RadioStation
 
 /* ─────────────────  МОДЕЛИ НАСТРОЕК  ───────────────── */
@@ -18,6 +19,12 @@ enum class MusicSource(val label: String) {
 }
 
 enum class SidebarSide { LEFT, RIGHT }
+
+/** Источник радио: интернет-поток или обычный FM-тюнер по антенне ГУ. */
+enum class RadioMode(val label: String) {
+    INTERNET("Интернет-радио"),
+    FM("FM-радио")
+}
 
 /**
  * Как показывать навигационное приложение на рабочем столе.
@@ -114,6 +121,10 @@ data class LauncherSettings(
 
     /* Радиостанции, сохранённые пользователем поиском (см. вкладку «Поиск» в Музыке) */
     val customStations: List<RadioStation> = emptyList(),
+    /** Интернет-радио или обычный FM-приём по антенне ГУ. */
+    val radioMode: RadioMode = RadioMode.INTERNET,
+    /** FM-станции, сохранённые вручную (частота + название). */
+    val fmStations: List<FmStation> = emptyList(),
 
     /* Навигация */
     /** Режим показа навигационного приложения на рабочем столе. */

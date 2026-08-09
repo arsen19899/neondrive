@@ -12,8 +12,8 @@ android {
         // Головные устройства на Android 6+ (большинство китайских ГУ — 8.1/10/12)
         minSdk = 23
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     buildTypes {

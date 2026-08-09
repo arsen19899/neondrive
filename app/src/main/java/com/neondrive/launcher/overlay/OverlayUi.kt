@@ -41,14 +41,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.MainActivity
-import com.neondrive.launcher.automation.AutomationService
+import com.neondrive.launcher.automation.FuelStationHub
 import com.neondrive.launcher.automation.SpeedProvider
+import com.neondrive.launcher.automation.WeatherHub
 import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.ui.home.ClockCard
+import com.neondrive.launcher.ui.home.DriveInfoRow
 import com.neondrive.launcher.ui.home.PlayerPanel
-import com.neondrive.launcher.ui.home.SpeedoPanel
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.NeonDriveTheme
 import com.neondrive.launcher.ui.theme.Neon
@@ -72,10 +73,11 @@ fun OverlayColumn(
     val gps by SpeedProvider.state.collectAsState()
     val now by PlayerHub.now.collectAsState()
     val source by PlayerHub.source.collectAsState()
-    val automation by AutomationService.status.collectAsState()
     val liked by PlayerHub.external.liked.collectAsState()
     val canLike by PlayerHub.external.canLike.collectAsState()
     val connecting by PlayerHub.connectingYandex.collectAsState()
+    val fuel by FuelStationHub.state.collectAsState()
+    val weather by WeatherHub.state.collectAsState()
 
     var volume by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
@@ -92,15 +94,17 @@ fun OverlayColumn(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            SpeedoPanel(
-                gps = gps,
-                units = settings.units,
-                accent = accentSpec.primary,
-                accent2 = accentSpec.secondary,
-                speedGainPercent = automation.speedGainPercent,
-                modifier = Modifier.fillMaxWidth(),
-                speedSteps = if (settings.speedVolumeEnabled) settings.speedSteps else emptyList()
-            )
+            if (settings.showSpeedometer) {
+                DriveInfoRow(
+                    gps = gps,
+                    units = settings.units,
+                    accent = accentSpec.primary,
+                    accent2 = accentSpec.secondary,
+                    fuel = fuel,
+                    weather = weather,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             PlayerPanel(
                 now = now,
                 source = source,

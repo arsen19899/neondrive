@@ -53,6 +53,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.data.MusicSource
+import com.neondrive.launcher.data.RadioMode
+import com.neondrive.launcher.media.FmRadioController
+import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.media.RadioBrowserApi
 import com.neondrive.launcher.ui.common.NeonSegmented
@@ -67,6 +70,8 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val tracks by PlayerHub.tracks.collectAsState()
     val stations by PlayerHub.stations.collectAsState()
+    val fmStationsTop by PlayerHub.fmStations.collectAsState()
+    val radioModeTop by PlayerHub.radioMode.collectAsState()
     val now by PlayerHub.now.collectAsState()
     val source by PlayerHub.source.collectAsState()
     var tab by remember { mutableStateOf(source) }
@@ -75,7 +80,8 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
         title = "Музыка",
         subtitle = when (tab) {
             MusicSource.DEVICE -> "${tracks.size} треков на устройстве"
-            MusicSource.RADIO -> "${stations.size} станций"
+            MusicSource.RADIO -> if (radioModeTop == RadioMode.FM) "${fmStationsTop.size} FM-станций"
+                else "${stations.size} станций"
             MusicSource.YANDEX -> "Управление приложением Яндекс.Музыка"
         },
         accent = accent,
@@ -128,7 +134,69 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
 
             MusicSource.RADIO -> {
                 var radioTab by remember { mutableStateOf(0) }
+                val radioMode by PlayerHub.radioMode.collectAsState()
+                val fmStations by PlayerHub.fmStations.collectAsState()
+
                 Column(Modifier.fillMaxSize()) {
+                    NeonSegmented(
+                        options = RadioMode.entries.toList(),
+                        selected = radioMode,
+                        label = { it.label },
+                        accent = accent,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { PlayerHub.setRadioMode(it) }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    if (radioMode == RadioMode.FM) {
+                        val fmState by FmRadioController.state.collectAsState()
+                        if (fmState.factoryAppFound) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ActionChip("Открыть заводское радио", accent2) {
+                                    PlayerHub.openFactoryRadioApp()
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        Text(
+                            "Настроиться на частоту нужно самой магнитолой — сторонним " +
+                                "приложениям Android не даёт управлять тюнером напрямую. " +
+                                "Список ниже — памятка со станциями.",
+                            color = Neon.TextLow,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        LazyColumn(
+                            Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(fmStations, key = { it.frequencyKHz }) { st: FmStation ->
+                                MediaRow(
+                                    title = st.label,
+                                    subtitle = "%.1f МГц".format(st.mhz),
+                                    meta = "FM",
+                                    active = now.title == st.label && source == MusicSource.RADIO &&
+                                        radioMode == RadioMode.FM,
+                                    accent = accent,
+                                    accent2 = accent2,
+                                    icon = Icons.Rounded.Radio,
+                                    onRemove = { PlayerHub.removeFmStation(st.frequencyKHz) }
+                                ) { PlayerHub.playFmStation(st) }
+                            }
+                            if (fmStations.isEmpty()) {
+                                item {
+                                    EmptyHint(
+                                        "FM-станций нет. Добавьте частоту вручную во вкладке " +
+                                            "«Радио» настроек оболочки."
+                                    )
+                                }
+                            }
+                        }
+                        return@Column
+                    }
+
                     NeonSegmented(
                         options = listOf(0, 1),
                         selected = radioTab,

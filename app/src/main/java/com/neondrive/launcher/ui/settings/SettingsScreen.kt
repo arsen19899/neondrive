@@ -53,7 +53,10 @@ import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.data.SpeedUnits
 import com.neondrive.launcher.data.SpeedVolumeStep
+import com.neondrive.launcher.data.RadioMode
 import com.neondrive.launcher.data.SwcAction
+import com.neondrive.launcher.media.FmRadioController
+import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
@@ -243,12 +246,34 @@ private fun RadioTab(accent: Color, accent2: Color) {
     val stations by PlayerHub.stations.collectAsState()
     val results by PlayerHub.stationSearch.collectAsState()
     val searching by PlayerHub.searching.collectAsState()
+    val radioMode by PlayerHub.radioMode.collectAsState()
 
     fun runSearch() {
         scope.launch { PlayerHub.searchStations(query) }
     }
 
     Column {
+        SettingsSection("Источник радио", accent) {
+            SettingRow(
+                "Интернет-радио или FM",
+                "FM работает только если к головному устройству физически подключена антенна " +
+                    "и прошивка предоставляет доступ к тюнеру",
+                accent
+            ) {
+                NeonSegmented(
+                    options = RadioMode.entries.toList(),
+                    selected = radioMode,
+                    label = { it.label },
+                    accent = accent
+                ) { v -> PlayerHub.setRadioMode(v) }
+            }
+        }
+
+        if (radioMode == RadioMode.FM) {
+            FmRadioSection(accent, accent2)
+            return@Column
+        }
+
         SettingsSection("Сохранённые станции", accent) {
             if (stations.isEmpty()) {
                 Hint("Станций пока нет — найдите их ниже и сохраните.", accent2)
@@ -334,6 +359,122 @@ private fun RadioTab(accent: Color, accent2: Color) {
             accent2
         )
     }
+}
+
+/**
+ * Обычное FM-радио по антенне ГУ.
+ *
+ * Важное честное ограничение: Android не даёт стороннему приложению (без прав
+ * системного/привилегированного) программно управлять тюнером — это защищено на
+ * уровне разрешений самой системы, и обхода для этого не существует. Поэтому раздел
+ * работает как шпаргалка станций «частота + название» (настроиться нужно кнопками
+ * самой магнитолы) плюс быстрый переход в заводское радио-приложение ГУ, если оно
+ * на устройстве есть — это единственное управление, которое действительно доступно.
+ */
+@Composable
+private fun FmRadioSection(accent: Color, accent2: Color) {
+    val context = LocalContext.current
+    val fmState by FmRadioController.state.collectAsState()
+    val fmStations by PlayerHub.fmStations.collectAsState()
+    var freqText by remember { mutableStateOf("") }
+    var nameText by remember { mutableStateOf("") }
+
+    LaunchedEffectOnce { FmRadioController.init(context) }
+
+    SettingsSection("Заводское радио-приложение", accent) {
+        SettingRow(
+            "Приложение радио на этом ГУ",
+            if (fmState.factoryAppFound) "Найдено (${fmState.factoryAppPackage}) — можно открыть напрямую"
+            else "Не найдено среди распространённых пакетов. Настройтесь на нужную частоту " +
+                "штатными кнопками магнитолы",
+            if (fmState.factoryAppFound) accent else Neon.Amber
+        ) {
+            if (fmState.factoryAppFound) {
+                SmallButton("Открыть", accent2) { PlayerHub.openFactoryRadioApp() }
+            }
+        }
+    }
+
+    SettingsSection("Сохранённые FM-станции", accent) {
+        if (fmStations.isEmpty()) {
+            Hint("Станций нет — добавьте частоту вручную ниже, для памяти.", accent2)
+        } else {
+            fmStations.forEach { st ->
+                SettingRow(st.label, "%.1f МГц".format(st.mhz), accent) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SmallButton("Выбрать", accent2) { PlayerHub.playFmStation(st) }
+                        SmallButton("Удалить", Neon.Red) { PlayerHub.removeFmStation(st.frequencyKHz) }
+                    }
+                }
+            }
+        }
+    }
+
+    SettingsSection("Добавить вручную", accent2) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FmField(freqText, { freqText = it }, "101.7", accent2, Modifier.width(90.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("МГц", color = Neon.TextLow, fontSize = 12.sp)
+            Spacer(Modifier.width(14.dp))
+            FmField(nameText, { nameText = it }, "Название (необязательно)", accent2, Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            SmallButton("Добавить", accent2) {
+                val mhz = freqText.replace(",", ".").toFloatOrNull()
+                if (mhz != null && mhz in 65f..108f) {
+                    PlayerHub.addFmStation(
+                        FmStation((mhz * 1000).roundToInt(), nameText.trim())
+                    )
+                    freqText = ""; nameText = ""
+                }
+            }
+        }
+    }
+
+    Hint(
+        "Android не позволяет обычному приложению без системных прав управлять FM-тюнером " +
+            "напрямую — это ограничение платформы, которое нельзя обойти программно. Список " +
+            "станций здесь — памятка с частотами; переключает их сама магнитола (штатными " +
+            "кнопками или заводским радио-приложением выше, если оно нашлось).",
+        accent2
+    )
+}
+
+@Composable
+private fun FmField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x330C1424))
+            .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        if (value.isEmpty()) {
+            Text(placeholder, color = Neon.TextLow, fontSize = 13.sp)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = TextStyle(color = Neon.TextHi, fontSize = 13.sp),
+            cursorBrush = SolidColor(accent),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+/** Мини-замена LaunchedEffect(Unit) без лишнего импорта на уровне файла. */
+@Composable
+private fun LaunchedEffectOnce(block: suspend () -> Unit) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { block() }
 }
 
 /* ═════════════════════  2. РЕАКЦИИ НА УВЕДОМЛЕНИЯ  ═════════════════════ */
@@ -729,9 +870,9 @@ private fun LookTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Se
 
         SettingsSection("Раскладка", accent2) {
             SettingRow(
-                "Спидометр на рабочем столе",
-                if (s.showSpeedometer) "Показан над плеером"
-                else "Скрыт — плеер занимает всю колонку приборов",
+                "Строка приборов (заправка · спидометр · погода)",
+                if (s.showSpeedometer) "Показана над плеером"
+                else "Скрыта — плеер занимает всю колонку приборов",
                 accent2
             ) {
                 NeonToggle(s.showSpeedometer, accent2) { v -> edit { it.setShowSpeedometer(v) } }
@@ -1001,7 +1142,7 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
             }
         }
 
-        Hint("NeonDrive · версия 1.0.0", accent)
+        Hint("NeonDrive · версия 1.2.0", accent)
     }
 }
 

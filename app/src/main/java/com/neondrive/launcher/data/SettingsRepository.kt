@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.RadioStation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -32,6 +33,8 @@ class SettingsRepository(private val context: Context) {
         val showSpeedometer = booleanPreferencesKey("show_speedometer")
         val reducedEffects = booleanPreferencesKey("reduced_effects")
         val customStations = stringPreferencesKey("custom_stations")
+        val radioMode = stringPreferencesKey("radio_mode")
+        val fmStations = stringPreferencesKey("fm_stations")
         val mapMode = stringPreferencesKey("map_mode")
         val mapAutoStart = booleanPreferencesKey("map_auto_start")
         val mapAutoStartDelay = intPreferencesKey("map_auto_start_delay")
@@ -82,6 +85,9 @@ class SettingsRepository(private val context: Context) {
             showSpeedometer = p[K.showSpeedometer] ?: d.showSpeedometer,
             reducedEffects = p[K.reducedEffects] ?: d.reducedEffects,
             customStations = p[K.customStations]?.let(::decodeStations) ?: d.customStations,
+            radioMode = p[K.radioMode]?.let { runCatching { RadioMode.valueOf(it) }.getOrNull() }
+                ?: d.radioMode,
+            fmStations = p[K.fmStations]?.let(::decodeFm) ?: d.fmStations,
             mapMode = p[K.mapMode]?.let { runCatching { MapMode.valueOf(it) }.getOrNull() }
                 ?: d.mapMode,
             mapAutoStart = p[K.mapAutoStart] ?: d.mapAutoStart,
@@ -136,6 +142,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShowSpeedometer(v: Boolean) = put { it[K.showSpeedometer] = v }
     suspend fun setReducedEffects(v: Boolean) = put { it[K.reducedEffects] = v }
     suspend fun setCustomStations(v: List<RadioStation>) = put { it[K.customStations] = encodeStations(v) }
+    suspend fun setRadioMode(v: RadioMode) = put { it[K.radioMode] = v.name }
+    suspend fun setFmStations(v: List<FmStation>) = put { it[K.fmStations] = encodeFm(v) }
     suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
     suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }
     suspend fun setMapAutoStartDelay(sec: Int) = put {
@@ -203,6 +211,19 @@ class SettingsRepository(private val context: Context) {
                 id = f[0], name = f[1], streamUrl = f[2],
                 genre = f.getOrElse(3) { "" }, builtIn = false
             )
+        }
+    }
+
+    private fun encodeFm(v: List<FmStation>) = v.joinToString("###REC###") {
+        listOf(it.frequencyKHz.toString(), it.name).joinToString("###FLD###")
+    }
+
+    private fun decodeFm(s: String): List<FmStation> {
+        if (s.isBlank()) return emptyList()
+        return s.split("###REC###").mapNotNull { rec ->
+            val f = rec.split("###FLD###")
+            val freq = f.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+            FmStation(frequencyKHz = freq, name = f.getOrElse(1) { "" })
         }
     }
 

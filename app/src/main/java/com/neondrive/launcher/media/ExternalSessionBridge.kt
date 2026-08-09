@@ -50,8 +50,13 @@ class ExternalSessionBridge(private val context: Context) {
             "ru.mts.music.android"
         )
 
-        private val LIKE_HINTS = listOf("like", "лайк", "heart", "favorite", "fav", "нрав")
-        private val DISLIKE_HINTS = listOf("dislike", "unlike", "дизлайк", "не нрав")
+        private val LIKE_HINTS = listOf(
+            "like", "лайк", "heart", "favorite", "fav", "нрав",
+            "избранное", "избран", "thumbup", "thumb_up"
+        )
+        private val DISLIKE_HINTS = listOf(
+            "dislike", "unlike", "дизлайк", "не нрав", "thumbdown", "thumb_down"
+        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -75,6 +80,19 @@ class ExternalSessionBridge(private val context: Context) {
     /** Текущее состояние лайка: true — нравится, false — нет, null — неизвестно. */
     private val _liked = MutableStateFlow<Boolean?>(null)
     val liked: StateFlow<Boolean?> = _liked
+
+    /**
+     * Только что нажатый лайк живёт здесь короткое время как «источник правды».
+     *
+     * Раньше `push()` на каждое обновление сессии (а сессия дёргается каждые 500 мс
+     * опросом) тут же перезаписывал [_liked] значением из метаданных приложения.
+     * Если приложение не отражает наш toggle в своём рейтинге сразу — а Яндекс.Музыка
+     * не всегда это делает, особенно если наш способ послать лайк ей не подошёл, —
+     * кнопка визуально «отменяла» нажатие в течение доли секунды. Выглядело так,
+     * будто лайк вообще не срабатывает.
+     */
+    private var likeOverrideValue: Boolean? = null
+    private var likeOverrideUntil = 0L
 
     /** Поддерживает ли сессия лайк хоть каким-то способом. */
     private val _canLike = MutableStateFlow(false)
@@ -179,11 +197,16 @@ class ExternalSessionBridge(private val context: Context) {
 
         // Текущее состояние лайка
         val rating = md?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
-        _liked.value = when {
+        val fromSession: Boolean? = when {
             rating == null || !rating.isRated -> null
             rating.ratingStyle == Rating.RATING_HEART -> rating.hasHeart()
             rating.ratingStyle == Rating.RATING_THUMB_UP_DOWN -> rating.isThumbUp
             else -> null
+        }
+        _liked.value = if (System.currentTimeMillis() < likeOverrideUntil) {
+            likeOverrideValue
+        } else {
+            fromSession
         }
     }
 
@@ -219,28 +242,48 @@ class ExternalSessionBridge(private val context: Context) {
     }
 
     /**
-     * Лайк. Сначала пробуем собственное действие приложения — оно точнее,
-     * потом стандартный рейтинг сессии.
+     * Лайк. Раньше пробовали только один способ — который найдётся первым — и на
+     * этом останавливались. Проблема в том, что наша эвристика для кастомных кнопок
+     * ищет лайк по ключевым словам в id/названии действия, а приложение может
+     * называть его как угодно; угадали не всегда. Теперь пробуем оба честных
+     * способа сразу — стандартный рейтинг сессии и найденную по эвристике кнопку —
+     * чтобы сработал хотя бы один, если он в принципе поддерживается приложением.
      */
     fun toggleLike() {
         val c = active ?: return
         val wantLike = _liked.value != true
+        var sentAnything = false
 
+        // Стандартный рейтинг сессии — только если приложение реально его поддерживает
+        // (RATING_NONE = «не поддерживает», слать в этом случае бессмысленно).
+        val style = c.metadata?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)?.ratingStyle
+            ?.takeIf { it != Rating.RATING_NONE }
+            ?: c.ratingType.takeIf { it != Rating.RATING_NONE }
+        if (style != null) {
+            val rating = when (style) {
+                Rating.RATING_THUMB_UP_DOWN -> Rating.newThumbRating(wantLike)
+                Rating.RATING_HEART -> Rating.newHeartRating(wantLike)
+                else -> null
+            }
+            if (rating != null && runCatching { c.transportControls.setRating(rating) }.isSuccess) {
+                sentAnything = true
+            }
+        }
+
+        // Кастомная кнопка приложения (иконка сердца/пальца в уведомлении)
         val custom = _actions.value.firstOrNull { if (wantLike) it.isLike else it.isDislike }
             ?: _actions.value.firstOrNull { it.isLike }
         if (custom != null) {
             sendAction(custom.id)
-            _liked.value = wantLike
-            return
+            sentAnything = true
         }
 
-        val style = c.metadata?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)?.ratingStyle
-            ?: c.ratingType
-        val rating = when (style) {
-            Rating.RATING_THUMB_UP_DOWN -> Rating.newThumbRating(wantLike)
-            else -> Rating.newHeartRating(wantLike)
-        }
-        runCatching { c.transportControls.setRating(rating) }
+        if (!sentAnything) return
+
+        // Optimistic UI: показываем нажатие сразу, не дожидаясь, пока приложение
+        // отразит его в своей сессии (а некоторые не отражают вовсе).
+        likeOverrideValue = wantLike
+        likeOverrideUntil = System.currentTimeMillis() + 2500
         _liked.value = wantLike
     }
 
@@ -250,27 +293,54 @@ class ExternalSessionBridge(private val context: Context) {
         runCatching { manager?.getActiveSessions(listenerComponent) }
             .getOrNull()?.any { it.packageName == pkg } == true
 
+    /**
+     * Показывался ли экран приложения при последнем [connect]. false — разбудили
+     * тихо через MediaBrowserService, экран пользователь не видел. UI ориентируется
+     * на этот флаг, чтобы решить, нужно ли забирать фокус обратно себе.
+     */
+    var lastConnectWasVisible: Boolean = false
+        private set
+
     fun launchApp(pkg: String = PKG_YANDEX_MUSIC): Boolean {
         val i = context.packageManager.getLaunchIntentForPackage(pkg)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Гасим системную анимацию перехода — вместе с мгновенным возвратом
+            // фокуса оболочке (см. PlayerHub.returnToLauncher) это сводит видимую
+            // «вспышку» чужого интерфейса к минимуму.
+            ?.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
             ?: return false
         return runCatching { context.startActivity(i) }.isSuccess
     }
 
     /**
-     * Поднять приложение и дождаться, пока оно создаст медиасессию.
+     * Поднять приложение и дождаться, пока оно создаст медиасессию — незаметно
+     * для пользователя, если это вообще возможно.
      *
-     * Без этого ожидания команда play уходит в пустоту: приложение ещё грузится,
-     * контроллера нет, и оболочка выглядит сломанной. Возвращает true, если сессия
-     * появилась и ей можно управлять.
+     * Сначала пробуем разбудить процесс через его MediaBrowserService (см.
+     * [SilentAppLauncher]) — так поддерживающие Android Auto приложения (Яндекс.Музыка
+     * в их числе) стартуют в фоне, никогда не показывая свой экран. Если такого
+     * сервиса нет или разбудить не удалось — только тогда открываем Activity
+     * напрямую, это единственный оставшийся способ получить сессию.
+     *
+     * Без ожидания появления сессии команда play уходит в пустоту: приложение ещё
+     * грузится, контроллера нет, и оболочка выглядит сломанной.
      */
     suspend fun connect(pkg: String = PKG_YANDEX_MUSIC, timeoutMs: Long = 12_000): Boolean {
         if (!hasAccess()) return false
 
         refresh()
-        if (active?.packageName == pkg) return true
+        if (active?.packageName == pkg) {
+            lastConnectWasVisible = false
+            return true
+        }
 
-        if (!isRunning(pkg)) launchApp(pkg)
+        if (!isRunning(pkg)) {
+            val wokeSilently = SilentAppLauncher.wake(context, pkg)
+            lastConnectWasVisible = !wokeSilently
+            if (!wokeSilently) launchApp(pkg)
+        } else {
+            lastConnectWasVisible = false
+        }
 
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {

@@ -15,7 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.neondrive.launcher.automation.AutomationService
+import com.neondrive.launcher.automation.FuelStationHub
 import com.neondrive.launcher.automation.SpeedProvider
+import com.neondrive.launcher.automation.WeatherHub
 import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.input.SteeringWheelManager
@@ -49,6 +51,8 @@ class MainActivity : ComponentActivity() {
 
         PlayerHub.init(applicationContext)
         AutomationService.start(applicationContext)
+        FuelStationHub.start(applicationContext)
+        WeatherHub.start(applicationContext)
         requestNeededPermissions()
 
         // Настройки могут меняться на ходу — реагируем на каждое изменение

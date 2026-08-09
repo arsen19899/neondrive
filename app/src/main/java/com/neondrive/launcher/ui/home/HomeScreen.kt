@@ -15,7 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.neondrive.launcher.automation.FuelStationHub
 import com.neondrive.launcher.automation.GpsState
+import com.neondrive.launcher.automation.WeatherHub
 import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
@@ -102,15 +104,16 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (settings.showSpeedometer) {
-                    SpeedoPanel(
+                    val fuel by FuelStationHub.state.collectAsState()
+                    val weather by WeatherHub.state.collectAsState()
+                    DriveInfoRow(
                         gps = gps,
                         units = settings.units,
                         accent = accent,
                         accent2 = accent2,
-                        speedGainPercent = speedGainPercent,
-                        modifier = Modifier.fillMaxWidth(),
-                        speedSteps = if (settings.speedVolumeEnabled) settings.speedSteps
-                        else emptyList()
+                        fuel = fuel,
+                        weather = weather,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
                 PlayerPanel(
