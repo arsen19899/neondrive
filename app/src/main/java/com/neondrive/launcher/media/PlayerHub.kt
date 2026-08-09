@@ -61,6 +61,10 @@ object PlayerHub {
     private val _radioMode = MutableStateFlow(RadioMode.INTERNET)
     val radioMode: StateFlow<RadioMode> = _radioMode
 
+    /** Папки на SD/USB, добавленные вручную через SAF — см. [addMusicFolder]. */
+    private val _extraMusicFolders = MutableStateFlow<List<String>>(emptyList())
+    val extraMusicFolders: StateFlow<List<String>> = _extraMusicFolders
+
     private var currentFmFreq: Int? = null
 
     private val _now = MutableStateFlow(NowPlaying())
@@ -88,6 +92,7 @@ object PlayerHub {
             if (s.customStations.isNotEmpty()) _stations.value = RadioPresets.default + s.customStations
             _fmStations.value = s.fmStations
             _radioMode.value = s.radioMode
+            _extraMusicFolders.value = s.extraMusicFolders
         }
 
         val token = SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
@@ -160,8 +165,31 @@ object PlayerHub {
     /* ─────────────────  БИБЛИОТЕКА  ───────────────── */
 
     suspend fun refreshLibrary() {
-        val list = MediaLibrary.scan(appContext)
+        val extraFolders = runCatching { settingsRepo.settings.first().extraMusicFolders }
+            .getOrDefault(emptyList())
+        val list = MediaLibrary.scan(appContext, extraFolders)
         withContext(Dispatchers.Main) { _tracks.value = list }
+    }
+
+    /**
+     * Добавить папку с музыкой на SD/USB через SAF — резервный путь для прошивок,
+     * которые не индексируют съёмный накопитель в MediaStore (см. [MediaLibrary]).
+     * [treeUri] — результат `ActivityResultContracts.OpenDocumentTree()`.
+     */
+    suspend fun addMusicFolder(treeUri: String) {
+        val current = _extraMusicFolders.value
+        if (treeUri in current) return
+        val updated = current + treeUri
+        runCatching { settingsRepo.setExtraMusicFolders(updated) }
+        _extraMusicFolders.value = updated
+        refreshLibrary()
+    }
+
+    suspend fun removeMusicFolder(treeUri: String) {
+        val updated = _extraMusicFolders.value - treeUri
+        runCatching { settingsRepo.setExtraMusicFolders(updated) }
+        _extraMusicFolders.value = updated
+        refreshLibrary()
     }
 
     fun addStation(station: RadioStation) {

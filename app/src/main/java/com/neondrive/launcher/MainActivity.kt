@@ -1,7 +1,10 @@
 package com.neondrive.launcher
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -36,6 +39,23 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var repo: SettingsRepository
 
+    // ACTION_MEDIA_MOUNTED — защищённая система-широковещательная рассылка, её нельзя
+    // объявить в манифесте (implicit broadcast от API 24), только регистрировать в коде,
+    // пока активность жива — благо лаунчер живёт почти всё время работы ГУ. Ловим
+    // подключение/отключение SD-карты и USB-накопителя и пересканируем библиотеку сразу,
+    // не дожидаясь, пока пользователь сам зайдёт во вкладку «Музыка» и нажмёт «обновить».
+    private val storageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            // MediaStore индексирует свежеподключённый том не мгновенно — небольшая
+            // задержка перед пересканированием ощутимо снижает шанс поймать пустой
+            // список сразу после физического подключения флешки.
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(1200)
+                runCatching { PlayerHub.refreshLibrary() }
+            }
+        }
+    }
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             SpeedProvider.start(applicationContext)
@@ -54,6 +74,22 @@ class MainActivity : ComponentActivity() {
         FuelStationHub.start(applicationContext)
         WeatherHub.start(applicationContext)
         requestNeededPermissions()
+
+        runCatching {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_MEDIA_MOUNTED)
+                addAction(Intent.ACTION_MEDIA_UNMOUNTED)
+                addAction(Intent.ACTION_MEDIA_EJECT)
+                addAction(Intent.ACTION_MEDIA_REMOVED)
+                addDataScheme("file")
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(storageReceiver, filter, RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(storageReceiver, filter)
+            }
+        }
 
         // Настройки могут меняться на ходу — реагируем на каждое изменение
         lifecycleScope.launch {
@@ -88,6 +124,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(storageReceiver) }
+        super.onDestroy()
     }
 
     override fun onResume() {

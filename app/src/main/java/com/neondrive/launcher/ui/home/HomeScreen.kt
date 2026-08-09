@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -30,9 +31,16 @@ import com.neondrive.launcher.ui.NeonScreen
 /**
  * Рабочий стол.
  *
- * Слева направо: колонка на 25 % ширины (спидометр сверху, плеер снизу),
- * карта на оставшиеся ~2/3 и вертикальный док с часами. Сторона дока меняется
- * в настройках — под правый или левый руль.
+ * Две раскладки в зависимости от пропорций экрана — от компактных ГУ 7" до
+ * портретных и ландшафтных планшетов 15":
+ *  • Альбомная (ширина больше высоты) — слева направо: колонка на 25 % ширины
+ *    (спидометр сверху, плеер снизу), карта на оставшиеся ~2/3 и вертикальный
+ *    док с часами сбоку;
+ *  • Портретная (высота больше ширины) — сверху вниз: горизонтальная полоса
+ *    дока, приборы и плеер компактной высоты, карта занимает всё оставшееся
+ *    место по вертикали.
+ * Сторона дока в альбомной раскладке меняется в настройках — под правый или левый руль;
+ * в портретной док всегда сверху, чтобы не спорить с эргономикой руля.
  */
 @Composable
 fun HomeScreen(
@@ -70,9 +78,13 @@ fun HomeScreen(
     val mapCollapsed = navFrameActive && settings.mapMode == MapMode.FRAME
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val columnWidth = maxWidth * 0.25f
+        // Портретный экран (планшет/ГУ, поставленный на попа) шире, чем выше —
+        // наоборот, ландшафтный. Порог 1:1 сам решает, какую раскладку строить;
+        // на любой промежуточной пропорции (почти квадратный экран) она просто
+        // выбирает ближайшую по факту без специального «третьего» варианта.
+        val isPortrait = maxHeight > maxWidth
 
-        val dock: @Composable () -> Unit = {
+        val dock: @Composable (Modifier) -> Unit = { m ->
             SideDock(
                 accent = accent,
                 use24h = settings.show24h,
@@ -82,62 +94,50 @@ fun HomeScreen(
                 onEqualizer = onEqualizer,
                 onAndroidSettings = onAndroidSettings,
                 onAllApps = onAllApps,
-                onLauncherSettings = onLauncherSettings
+                onLauncherSettings = onLauncherSettings,
+                horizontal = isPortrait,
+                modifier = m
             )
         }
 
-        Row(
-            Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (settings.sidebarSide == SidebarSide.LEFT) dock()
-
-            // Колонка приборов: спидометр сверху, плеер снизу.
-            // Когда навигатор занял место карты, колонка растягивается на всё
-            // освободившееся пространство вместо фиксированной четверти экрана.
-            Column(
-                Modifier
-                    .then(if (mapCollapsed) Modifier.weight(1f) else Modifier.width(columnWidth))
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (settings.showSpeedometer) {
-                    val fuel by FuelStationHub.state.collectAsState()
-                    val weather by WeatherHub.state.collectAsState()
-                    DriveInfoRow(
-                        gps = gps,
-                        units = settings.units,
-                        accent = accent,
-                        accent2 = accent2,
-                        fuel = fuel,
-                        weather = weather,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                PlayerPanel(
-                    now = now,
-                    source = source,
+        val driveInfo: @Composable () -> Unit = {
+            if (settings.showSpeedometer) {
+                val fuel by FuelStationHub.state.collectAsState()
+                val weather by WeatherHub.state.collectAsState()
+                DriveInfoRow(
+                    gps = gps,
+                    units = settings.units,
                     accent = accent,
                     accent2 = accent2,
-                    volumePercent = volumePercent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    liked = liked,
-                    canLike = canLike,
-                    connecting = connecting,
-                    onLike = { PlayerHub.toggleLike() },
-                    onSource = onSource,
-                    onPlayPause = onPlayPause,
-                    onNext = onNext,
-                    onPrev = onPrev,
-                    onVolume = onVolume,
-                    onOpenLibrary = onOpenLibrary
+                    fuel = fuel,
+                    weather = weather,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
+        }
 
+        val player: @Composable (Modifier) -> Unit = { m ->
+            PlayerPanel(
+                now = now,
+                source = source,
+                accent = accent,
+                accent2 = accent2,
+                volumePercent = volumePercent,
+                modifier = m.fillMaxWidth(),
+                liked = liked,
+                canLike = canLike,
+                connecting = connecting,
+                onLike = { PlayerHub.toggleLike() },
+                onSource = onSource,
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                onPrev = onPrev,
+                onVolume = onVolume,
+                onOpenLibrary = onOpenLibrary
+            )
+        }
+
+        val map: @Composable (Modifier) -> Unit = { m ->
             // Карта — всё остальное пространство. Пока настоящий навигатор поднят
             // во фрейме, панель-заглушка не нужна: реальное окно уже стоит на её месте.
             if (!mapCollapsed) {
@@ -146,13 +146,62 @@ fun HomeScreen(
                     settings = settings,
                     accent = accent,
                     accent2 = accent2,
-                    modifier = Modifier
+                    modifier = m
+                )
+            }
+        }
+
+        if (isPortrait) {
+            // Сверху вниз: горизонтальная полоса дока, приборы и плеер компактной
+            // высоты (не резиновые — иначе на высоком экране плеер растянется
+            // на пол-экрана впустую), карта забирает весь остаток по вертикали.
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                dock(Modifier.fillMaxWidth())
+                driveInfo()
+                player(Modifier.heightIn(min = 150.dp, max = 260.dp))
+                map(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+            }
+        } else {
+            val columnWidth = maxWidth * 0.25f
+
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (settings.sidebarSide == SidebarSide.LEFT) dock(Modifier.fillMaxHeight())
+
+                // Колонка приборов: спидометр сверху, плеер снизу.
+                // Когда навигатор занял место карты, колонка растягивается на всё
+                // освободившееся пространство вместо фиксированной четверти экрана.
+                Column(
+                    Modifier
+                        .then(if (mapCollapsed) Modifier.weight(1f) else Modifier.width(columnWidth))
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    driveInfo()
+                    player(Modifier.weight(1f))
+                }
+
+                map(
+                    Modifier
                         .weight(1f)
                         .fillMaxHeight()
                 )
-            }
 
-            if (settings.sidebarSide == SidebarSide.RIGHT) dock()
+                if (settings.sidebarSide == SidebarSide.RIGHT) dock(Modifier.fillMaxHeight())
+            }
         }
     }
 }

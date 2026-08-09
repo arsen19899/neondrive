@@ -29,7 +29,11 @@ fun ClockCard(
     accent: Color,
     use24h: Boolean,
     modifier: Modifier = Modifier,
-    compact: Boolean = true
+    compact: Boolean = true,
+    // false — в горизонтальном скроллящемся доке (портретный экран), где
+    // fillMaxWidth() внутри Modifier.horizontalScroll поймал бы Infinity-ограничение
+    // по ширине и уронил бы layout.
+    fillWidth: Boolean = true
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -45,7 +49,10 @@ fun ClockCard(
     val dowFmt = remember { SimpleDateFormat("EEEE", ru) }
     val date = Date(nowMs)
 
-    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        if (fillWidth) modifier.fillMaxWidth() else modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Text(
             text = timeFmt.format(date),
             color = Neon.TextHi,

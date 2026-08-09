@@ -141,8 +141,21 @@ class NeonOverlayService : LifecycleService() {
         val h = OverlayComposeHost(this).also { host = it }
 
         val metrics = resources.displayMetrics
-        val columnWidth = (metrics.widthPixels * 0.25f).toInt()
-        val dockWidth = (108 * metrics.density).toInt()
+        val density = metrics.density
+        // Раньше колонка приборов и док были заметно уже, чем на рабочем столе —
+        // на планшетах пошире это ломало стили: дата в доке не влезала в одну
+        // строку, а плеер и виджеты приборов было тяжело читать. Плавающие окна
+        // задаются в пикселях, поэтому берём долю ширины экрана, но не меньше
+        // разумного минимума в dp — тогда даже на компактном 7" ГУ панели не
+        // сожмутся до нечитаемого состояния.
+        val columnWidth = maxOf(
+            (metrics.widthPixels * 0.32f).toInt(),
+            (360 * density).toInt()
+        ).coerceAtMost((metrics.widthPixels * 0.5f).toInt())
+        val dockWidth = maxOf(
+            (metrics.widthPixels * 0.15f).toInt(),
+            (172 * density).toInt()
+        )
         val side = settingsState.value.sidebarSide
 
         val column = h.createView {
@@ -155,7 +168,9 @@ class NeonOverlayService : LifecycleService() {
             OverlayDock(
                 settingsFlow = settingsState,
                 onOpenLauncher = ::openLauncher,
-                onHide = { hide(applicationContext) }
+                onHide = {
+                    com.neondrive.launcher.nav.MapFrameController.stop(applicationContext)
+                }
             )
         }
 
@@ -206,6 +221,12 @@ class NeonOverlayService : LifecycleService() {
     }
 
     private fun openLauncher() {
+        // «Домой» должен сразу убирать плавающие панели — раньше они продолжали
+        // висеть поверх свёрнутой навигации, пока пользователь отдельно не нажимал
+        // «Убрать панели». Через MapFrameController.stop(), а не hide() напрямую —
+        // так синхронно сбрасывается и состояние [MapFrameController.active],
+        // которым руководствуется чип «Убрать панели» на самой карте.
+        runCatching { com.neondrive.launcher.nav.MapFrameController.stop(applicationContext) }
         runCatching {
             startActivity(
                 Intent(this, MainActivity::class.java)

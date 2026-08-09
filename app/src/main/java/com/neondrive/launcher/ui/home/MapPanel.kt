@@ -141,26 +141,24 @@ fun MapPanel(
         }
 
         // Подсказка про активный режим — по центру, поверх HUD
-        if (settings.mapMode != MapMode.OFF) {
-            Box(
-                Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xB3060B14))
-                    .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                    .clickable(onClick = launch)
-                    .padding(horizontal = 22.dp, vertical = 14.dp)
-            ) {
-                Text(
-                    if (settings.mapMode == MapMode.FRAME)
-                        "Нажмите, чтобы открыть $navLabel во фрейме"
-                    else
-                        "Нажмите, чтобы открыть $navLabel с панелями поверх",
-                    fontSize = 12.sp,
-                    color = accent2,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xB3060B14))
+                .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                .clickable(onClick = launch)
+                .padding(horizontal = 22.dp, vertical = 14.dp)
+        ) {
+            Text(
+                if (settings.mapMode == MapMode.FRAME)
+                    "Нажмите, чтобы открыть $navLabel во фрейме"
+                else
+                    "Нажмите, чтобы открыть $navLabel с панелями поверх",
+                fontSize = 12.sp,
+                color = accent2,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         Row(
@@ -223,7 +221,6 @@ fun MapPanel(
                         when (settings.mapMode) {
                             MapMode.FRAME -> "ВО ФРЕЙМЕ"
                             MapMode.OVERLAY -> "ПОВЕРХ КАРТЫ"
-                            MapMode.OFF -> "РАЗВЕРНУТЬ"
                         },
                         fontSize = 11.sp,
                         letterSpacing = 1.4.sp,

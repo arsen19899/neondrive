@@ -21,8 +21,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import java.io.File
 
 /** Скруглённая «стеклянная» панель с неоновым контуром и внутренним свечением. */
 fun Modifier.neonPanel(
@@ -86,7 +89,10 @@ fun Modifier.neonEdge(accent: Color, radius: Dp = 22.dp, width: Dp = 1.dp): Modi
     }
 
 /**
- * Фон рабочего стола: тёмный градиент + перспективная сетка + пара «пятен» неона.
+ * Фон рабочего стола: тёмный градиент + перспективная сетка + пара «пятен» неона,
+ * либо — если пользователь загрузил свою картинку — она сама, растянутая на весь
+ * экран и притемнённая полупрозрачным чёрным слоем (scrim), чтобы яркое фото не
+ * било по глазам в темноте салона и не забивало читаемость текста поверх него.
  * Рисуется один раз на весь экран — дешевле, чем анимировать каждую панель.
  */
 @Composable
@@ -94,8 +100,30 @@ fun NeonBackdrop(
     accent: Color,
     accent2: Color,
     animated: Boolean = true,
+    backgroundImagePath: String = "",
+    backgroundDarken: Float = 0.55f,
     content: @Composable BoxScope.() -> Unit
 ) {
+    if (backgroundImagePath.isNotBlank() && File(backgroundImagePath).exists()) {
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = File(backgroundImagePath),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Затемняющий фильтр: даже самая яркая картинка не будет резать глаз
+            // и не будет мешать читаемости панелей поверх неё.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = backgroundDarken.coerceIn(0f, 0.92f)))
+            )
+            Box(Modifier.fillMaxSize(), content = content)
+        }
+        return
+    }
+
     // Раньше infiniteTransition крутился всегда, даже когда результат отбрасывался
     // (animated = false) — на слабых ГУ это лишняя перерисовка каждый кадр вхолостую.
     val t = if (animated) {

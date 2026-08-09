@@ -46,13 +46,13 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         // Аудиосессия нужна эквалайзеру
-        AudioFxController.attach(exo.audioSessionId)
+        AudioFxController.attach(this, exo.audioSessionId)
         exo.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onAudioSessionIdChanged(
                 eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
                 audioSessionId: Int
             ) {
-                AudioFxController.attach(audioSessionId)
+                AudioFxController.attach(this@PlaybackService, audioSessionId)
             }
         })
     }

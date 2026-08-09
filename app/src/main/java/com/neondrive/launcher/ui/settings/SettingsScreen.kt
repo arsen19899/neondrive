@@ -1,7 +1,10 @@
 package com.neondrive.launcher.ui.settings
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -73,7 +76,10 @@ import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.neonGlow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 typealias SettingsEdit = (suspend (SettingsRepository) -> Unit) -> Unit
 
@@ -831,6 +837,29 @@ private val KNOWN_ADC_PATHS = listOf(
 
 @Composable
 private fun LookTab(s: LauncherSettings, accent: Color, accent2: Color, edit: SettingsEdit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Картинка копируется во внутреннее хранилище приложения сразу при выборе —
+    // так фон переживёт перезагрузку ГУ и не зависит от того, умеет ли конкретный
+    // системный пикер выдавать постоянное разрешение на content://-ссылку.
+    val pickBackground = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val path = runCatching {
+                val dir = File(context.filesDir, "background").apply { mkdirs() }
+                val dest = File(dir, "custom_bg.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(dest).use { output -> input.copyTo(output) }
+                } ?: return@runCatching null
+                dest.absolutePath
+            }.getOrNull()
+            if (path != null) edit { it.setBackgroundImagePath(path) }
+        }
+    }
+
     Column {
         SettingsSection("Неон", accent) {
             SettingRow("Цвет акцента", "Задаёт свечение всей оболочки", accent) {
@@ -853,7 +882,43 @@ private fun LookTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Se
                     }
                 }
             }
-            SettingRow("Анимированный фон", "Дрейф неоновых пятен и сетка перспективы", accent) {
+            SettingRow(
+                "Фон рабочего стола",
+                if (s.backgroundImagePath.isBlank()) "Стандартный неоновый фон"
+                else "Своя картинка",
+                accent
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallButton("Загрузить", accent) { pickBackground.launch("image/*") }
+                    if (s.backgroundImagePath.isNotBlank()) {
+                        SmallButton("Сбросить", Neon.Red) { edit { it.setBackgroundImagePath("") } }
+                    }
+                }
+            }
+            if (s.backgroundImagePath.isNotBlank()) {
+                SettingRow(
+                    "Затемнение фона",
+                    "Приглушает яркую картинку, чтобы не резала глаз и не мешала читать панели",
+                    accent
+                ) {
+                    Text(
+                        "${(s.backgroundDarken * 100).roundToInt()}%",
+                        color = accent, fontSize = 12.sp, fontFamily = FontFamily.Monospace
+                    )
+                }
+                NeonSlider(
+                    value = s.backgroundDarken,
+                    range = 0.15f..0.9f,
+                    accent = accent,
+                    modifier = Modifier.fillMaxWidth()
+                ) { v -> edit { it.setBackgroundDarken(v) } }
+            }
+            SettingRow(
+                "Анимированный фон",
+                if (s.backgroundImagePath.isBlank()) "Дрейф неоновых пятен и сетка перспективы"
+                else "Не действует, пока выбрана своя картинка",
+                accent
+            ) {
                 NeonToggle(s.animatedBackground, accent) { v ->
                     edit { it.setAnimatedBackground(v) }
                 }
@@ -987,32 +1052,30 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                 }
             }
 
-            if (s.mapMode != MapMode.OFF) {
+            SettingRow(
+                "Запускать навигацию автоматически",
+                "Сразу после старта оболочки карта поднимается сама — не нужно ничего нажимать",
+                accent2
+            ) {
+                NeonToggle(s.mapAutoStart, accent2) { v -> edit { it.setMapAutoStart(v) } }
+            }
+            if (s.mapAutoStart) {
                 SettingRow(
-                    "Запускать навигацию автоматически",
-                    "Сразу после старта оболочки карта поднимается сама — не нужно ничего нажимать",
+                    "Задержка автозапуска",
+                    "${s.mapAutoStartDelaySec} с — чтобы система и GPS успели подняться",
                     accent2
                 ) {
-                    NeonToggle(s.mapAutoStart, accent2) { v -> edit { it.setMapAutoStart(v) } }
+                    NeonSlider(
+                        value = s.mapAutoStartDelaySec.toFloat(),
+                        range = 0f..30f,
+                        accent = accent2,
+                        modifier = Modifier.width(220.dp)
+                    ) { v -> edit { it.setMapAutoStartDelay(v.roundToInt()) } }
                 }
-                if (s.mapAutoStart) {
-                    SettingRow(
-                        "Задержка автозапуска",
-                        "${s.mapAutoStartDelaySec} с — чтобы система и GPS успели подняться",
-                        accent2
-                    ) {
-                        NeonSlider(
-                            value = s.mapAutoStartDelaySec.toFloat(),
-                            range = 0f..30f,
-                            accent = accent2,
-                            modifier = Modifier.width(220.dp)
-                        ) { v -> edit { it.setMapAutoStartDelay(v.roundToInt()) } }
-                    }
-                }
-                SettingRow("Проверить сейчас", "Поднять карту в выбранном режиме", accent) {
-                    SmallButton("Запустить", accent) {
-                        MapFrameController.launch(context, s)
-                    }
+            }
+            SettingRow("Проверить сейчас", "Поднять карту в выбранном режиме", accent) {
+                SmallButton("Запустить", accent) {
+                    MapFrameController.launch(context, s)
                 }
             }
         }
@@ -1142,7 +1205,7 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
             }
         }
 
-        Hint("NeonDrive · версия 1.2.0", accent)
+        Hint("NeonDrive · версия 1.3.0", accent)
     }
 }
 

@@ -12,8 +12,8 @@ android {
         // Головные устройства на Android 6+ (большинство китайских ГУ — 8.1/10/12)
         minSdk = 23
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     buildTypes {
@@ -101,6 +101,9 @@ dependencies {
 
     // Хранилище настроек
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // SAF-доступ к папкам на USB/SD, когда прошивка ГУ не индексирует их в MediaStore
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     // Загрузка обложек / иконок
     implementation("io.coil-kt:coil-compose:2.7.0")

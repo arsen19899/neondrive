@@ -39,12 +39,6 @@ object MapFrameController {
     fun launch(context: Context, settings: LauncherSettings): Boolean {
         val pkg = settings.mapPackage
         return when (settings.mapMode) {
-            MapMode.OFF -> {
-                NeonOverlayService.hide(context)
-                _active.value = false
-                NavigatorBridge.openFullscreen(context, pkg)
-            }
-
             MapMode.FRAME -> {
                 NeonOverlayService.hide(context)
                 val bounds = _frameBounds.value
@@ -95,7 +89,7 @@ object MapFrameController {
         awaitBounds: suspend () -> Unit
     ) {
         if (autoStarted) return
-        if (!settings.mapAutoStart || settings.mapMode == MapMode.OFF) return
+        if (!settings.mapAutoStart) return
         autoStarted = true
 
         kotlinx.coroutines.delay(settings.mapAutoStartDelaySec * 1000L)

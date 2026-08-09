@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -32,6 +33,9 @@ class SettingsRepository(private val context: Context) {
         val mapPackage = stringPreferencesKey("map_package")
         val showSpeedometer = booleanPreferencesKey("show_speedometer")
         val reducedEffects = booleanPreferencesKey("reduced_effects")
+        val backgroundImagePath = stringPreferencesKey("background_image_path")
+        val backgroundDarken = floatPreferencesKey("background_darken")
+        val extraMusicFolders = stringPreferencesKey("extra_music_folders")
         val customStations = stringPreferencesKey("custom_stations")
         val radioMode = stringPreferencesKey("radio_mode")
         val fmStations = stringPreferencesKey("fm_stations")
@@ -84,6 +88,9 @@ class SettingsRepository(private val context: Context) {
             mapPackage = p[K.mapPackage] ?: d.mapPackage,
             showSpeedometer = p[K.showSpeedometer] ?: d.showSpeedometer,
             reducedEffects = p[K.reducedEffects] ?: d.reducedEffects,
+            backgroundImagePath = p[K.backgroundImagePath] ?: d.backgroundImagePath,
+            backgroundDarken = p[K.backgroundDarken] ?: d.backgroundDarken,
+            extraMusicFolders = p[K.extraMusicFolders]?.let(::decodeStringList) ?: d.extraMusicFolders,
             customStations = p[K.customStations]?.let(::decodeStations) ?: d.customStations,
             radioMode = p[K.radioMode]?.let { runCatching { RadioMode.valueOf(it) }.getOrNull() }
                 ?: d.radioMode,
@@ -141,6 +148,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setMapPackage(v: String) = put { it[K.mapPackage] = v }
     suspend fun setShowSpeedometer(v: Boolean) = put { it[K.showSpeedometer] = v }
     suspend fun setReducedEffects(v: Boolean) = put { it[K.reducedEffects] = v }
+    suspend fun setBackgroundImagePath(v: String) = put { it[K.backgroundImagePath] = v }
+    suspend fun setBackgroundDarken(v: Float) = put { it[K.backgroundDarken] = v.coerceIn(0f, 0.92f) }
+    suspend fun setExtraMusicFolders(v: List<String>) = put { it[K.extraMusicFolders] = encodeStringList(v) }
     suspend fun setCustomStations(v: List<RadioStation>) = put { it[K.customStations] = encodeStations(v) }
     suspend fun setRadioMode(v: RadioMode) = put { it[K.radioMode] = v.name }
     suspend fun setFmStations(v: List<FmStation>) = put { it[K.fmStations] = encodeFm(v) }
@@ -226,6 +236,11 @@ class SettingsRepository(private val context: Context) {
             FmStation(frequencyKHz = freq, name = f.getOrElse(1) { "" })
         }
     }
+
+    private fun encodeStringList(v: List<String>) = v.joinToString("###REC###")
+
+    private fun decodeStringList(s: String): List<String> =
+        if (s.isBlank()) emptyList() else s.split("###REC###").filter { it.isNotBlank() }
 
     private fun encodeSteps(v: List<SpeedVolumeStep>) =
         v.joinToString("|") { "${it.fromKmh}:${it.gain}" }

@@ -1,5 +1,9 @@
 package com.neondrive.launcher.ui.music
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -74,7 +80,25 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
     val radioModeTop by PlayerHub.radioMode.collectAsState()
     val now by PlayerHub.now.collectAsState()
     val source by PlayerHub.source.collectAsState()
+    val extraFolders by PlayerHub.extraMusicFolders.collectAsState()
     var tab by remember { mutableStateOf(source) }
+
+    // Резервный путь: если прошивка ГУ не индексирует USB/SD в MediaStore, пользователь
+    // указывает папку вручную через системный выбор (SAF) — она пересканируется вместе
+    // с обычной библиотекой. Разрешение на чтение берём «навсегда», чтобы папка
+    // пережила перезагрузку ГУ.
+    val pickFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
+        scope.launch { PlayerHub.addMusicFolder(uri.toString()) }
+    }
 
     NeonScreenScaffold(
         title = "Музыка",
@@ -96,6 +120,23 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                     onSelect = { tab = it }
                 )
                 Spacer(Modifier.size(10.dp))
+                if (tab == MusicSource.DEVICE) {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x660C1424))
+                            .border(1.dp, accent2.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                            .clickable { runCatching { pickFolder.launch(null) } },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.CreateNewFolder, "Добавить папку с USB/SD",
+                            tint = accent2, modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.size(10.dp))
+                }
                 Box(
                     Modifier
                         .size(46.dp)
@@ -116,6 +157,45 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                 contentPadding = PaddingValues(bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (extraFolders.isNotEmpty()) {
+                    item {
+                        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            extraFolders.forEach { folderUri ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0x330C1424))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Folder, null,
+                                        tint = accent2.copy(alpha = 0.8f), modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                    Text(
+                                        runCatching { Uri.parse(folderUri).lastPathSegment }
+                                            .getOrNull() ?: folderUri,
+                                        color = Neon.TextMid,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        Icons.Rounded.Close, "Убрать папку",
+                                        tint = Neon.TextLow,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable { scope.launch { PlayerHub.removeMusicFolder(folderUri) } }
+                                    )
+                                }
+                                Spacer(Modifier.size(6.dp))
+                            }
+                        }
+                    }
+                }
                 itemsIndexed(tracks, key = { _, t -> t.uri.toString() }) { index, track ->
                     MediaRow(
                         title = track.title,
@@ -128,7 +208,13 @@ fun MusicScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                     ) { PlayerHub.playTracks(tracks, index) }
                 }
                 if (tracks.isEmpty()) {
-                    item { EmptyHint("Аудиофайлы не найдены. Проверьте карту памяти или USB-накопитель.") }
+                    item {
+                        EmptyHint(
+                            "Аудиофайлы не найдены. Проверьте карту памяти или USB-накопитель — " +
+                                "либо, если прошивка не видит накопитель сама, добавьте его папку " +
+                                "вручную кнопкой «папка» вверху."
+                        )
+                    }
                 }
             }
 

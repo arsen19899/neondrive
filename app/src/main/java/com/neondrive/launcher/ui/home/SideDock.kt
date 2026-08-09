@@ -1,10 +1,13 @@
 package com.neondrive.launcher.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,8 +31,14 @@ import com.neondrive.launcher.ui.common.DockButton
 import com.neondrive.launcher.ui.theme.neonPanel
 
 /**
- * Вертикальный док — «пульт» оболочки. Сверху часы и дата, ниже шесть плиток:
- * телефон, навигация, эквалайзер, настройки Android, все приложения, настройки оболочки.
+ * Док — «пульт» оболочки: часы и шесть плиток (телефон, навигация, эквалайзер,
+ * настройки Android, все приложения, настройки оболочки).
+ *
+ * Две раскладки под одну и ту же логику, чтобы работать что на широком ландшафтном
+ * экране ГУ, что на портретном планшете:
+ *  • [horizontal] = false — классический вертикальный столбец сбоку (широкий экран);
+ *  • [horizontal] = true  — горизонтальная полоса сверху/снизу (портретный экран),
+ *    часы и плитки идут в ряд, при нехватке места полоса скроллится по горизонтали.
  */
 @Composable
 fun SideDock(
@@ -42,8 +51,57 @@ fun SideDock(
     onAndroidSettings: () -> Unit,
     onAllApps: () -> Unit,
     onLauncherSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    horizontal: Boolean = false
 ) {
+    if (horizontal) {
+        Box(
+            modifier
+                .fillMaxWidth()
+                .height(92.dp)
+                .neonPanel(accent, radius = 22.dp)
+        ) {
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ClockCard(accent = accent, use24h = use24h, compact = true, fillWidth = false)
+
+                Box(
+                    Modifier
+                        .padding(vertical = 6.dp)
+                        .width(1.dp)
+                        .height(48.dp)
+                        .background(accent.copy(alpha = 0.25f))
+                )
+
+                DockButton(Icons.Rounded.Phone, "Телефон", false, accent, onClick = onPhone)
+                DockButton(
+                    Icons.Rounded.Navigation, "Навигация",
+                    current == NeonScreen.HOME, accent, onClick = onNavigation
+                )
+                DockButton(
+                    Icons.Rounded.Equalizer, "Эквалайзер",
+                    current == NeonScreen.EQUALIZER, accent, onClick = onEqualizer
+                )
+                DockButton(Icons.Rounded.Settings, "Система", false, accent, onClick = onAndroidSettings)
+                DockButton(
+                    Icons.Rounded.Apps, "Приложения",
+                    current == NeonScreen.APPS, accent, onClick = onAllApps
+                )
+                DockButton(
+                    Icons.Rounded.Tune, "Оболочка",
+                    current == NeonScreen.SETTINGS, accent, onClick = onLauncherSettings
+                )
+            }
+        }
+        return
+    }
+
     Box(
         modifier
             .width(96.dp)
