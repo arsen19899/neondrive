@@ -7,7 +7,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -16,11 +23,15 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import com.neondrive.launcher.automation.AutomationService
 import com.neondrive.launcher.automation.SpeedProvider
 import com.neondrive.launcher.data.LauncherSettings
+import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
@@ -136,37 +147,120 @@ fun NeonRoot(
                     onLauncherSettings = { screen = NeonScreen.SETTINGS }
                 )
 
-                NeonScreen.APPS -> AllAppsScreen(
-                    accent = accent,
-                    accent2 = accent2,
-                    onBack = { screen = NeonScreen.HOME }
-                )
+                NeonScreen.APPS -> FrameSafeArea(settings) {
+                    AllAppsScreen(
+                        accent = accent,
+                        accent2 = accent2,
+                        onBack = { screen = NeonScreen.HOME }
+                    )
+                }
 
-                NeonScreen.MUSIC -> MusicScreen(
-                    accent = accent,
-                    accent2 = accent2,
-                    onBack = { screen = NeonScreen.HOME }
-                )
+                NeonScreen.MUSIC -> FrameSafeArea(settings) {
+                    MusicScreen(
+                        accent = accent,
+                        accent2 = accent2,
+                        onBack = { screen = NeonScreen.HOME }
+                    )
+                }
 
-                NeonScreen.EQUALIZER -> EqualizerScreen(
-                    accent = accent,
-                    accent2 = accent2,
-                    onBack = { screen = NeonScreen.HOME }
-                )
+                NeonScreen.EQUALIZER -> FrameSafeArea(settings) {
+                    EqualizerScreen(
+                        accent = accent,
+                        accent2 = accent2,
+                        onBack = { screen = NeonScreen.HOME }
+                    )
+                }
 
-                NeonScreen.PHONE -> PhoneScreen(
-                    accent = accent,
-                    accent2 = accent2,
-                    onBack = { screen = NeonScreen.HOME }
-                )
+                NeonScreen.PHONE -> FrameSafeArea(settings) {
+                    PhoneScreen(
+                        accent = accent,
+                        accent2 = accent2,
+                        onBack = { screen = NeonScreen.HOME }
+                    )
+                }
 
-                NeonScreen.SETTINGS -> SettingsScreen(
-                    settings = settings,
-                    accent = accent,
-                    accent2 = accent2,
-                    onBack = { screen = NeonScreen.HOME },
-                    edit = { block -> scope.launch { block(repo) } }
-                )
+                NeonScreen.SETTINGS -> FrameSafeArea(settings) {
+                    SettingsScreen(
+                        settings = settings,
+                        accent = accent,
+                        accent2 = accent2,
+                        onBack = { screen = NeonScreen.HOME },
+                        edit = { block -> scope.launch { block(repo) } }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Обёртка для всех экранов, кроме рабочего стола.
+ *
+ * Пока навигатор поднят «во фрейме» (MapMode.FRAME + MapFrameController.active),
+ * его плавающее окно — отдельное окно системы, а не часть нашего UI. Оно висит
+ * поверх части экрана ровно там, где раньше была панель карты, и остаётся там
+ * независимо от того, что сейчас показывает оболочка под ним. Если рисовать
+ * настройки (или любой другой экран) на весь экран как обычно, часть их —
+ * там, где раньше была карта — физически перекрыта окном навигатора: не видна
+ * и не нажимается.
+ *
+ * Поэтому в момент, когда навигатор во фрейме активен, контент вписывается
+ * только в свободную полосу — ту же, что на рабочем столе занимают док и
+ * колонка приборов (её границы — это буквально всё, что не входит в
+ * [MapFrameController.frameBounds], последний раз сообщённый панелью карты).
+ * В режиме «Поверх карты» и когда фрейм не активен, экран занимает всё место
+ * как раньше.
+ */
+@Composable
+private fun FrameSafeArea(
+    settings: LauncherSettings,
+    content: @Composable () -> Unit
+) {
+    val frameActive by MapFrameController.active.collectAsState()
+    if (!frameActive || settings.mapMode != MapMode.FRAME) {
+        content()
+        return
+    }
+
+    val bounds by MapFrameController.frameBounds.collectAsState()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (bounds.isEmpty) {
+            // Границы ещё не запоминались (например, оболочку перезапустили, пока
+            // навигатор уже был поднят) — безопаснее показать во весь экран, чем
+            // угадать не туда.
+            content()
+            return@BoxWithConstraints
+        }
+        val density = LocalDensity.current
+        val screenWidthPx = with(density) { maxWidth.toPx() }
+        val screenHeightPx = with(density) { maxHeight.toPx() }
+
+        // Карта в портретной раскладке занимает всю ширину и нижнюю часть высоты;
+        // в ландшафтной — всю высоту и часть ширины сбоку. По этому признаку и
+        // определяем, где искать свободную полосу.
+        val mapSpansFullWidth = bounds.width() >= screenWidthPx * 0.85f
+
+        Box(Modifier.fillMaxSize().padding(12.dp)) {
+            if (mapSpansFullWidth) {
+                val freeHeightPx = bounds.top.toFloat().coerceAtLeast(0f)
+                val freeHeight = with(density) { freeHeightPx.toDp() }
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .height(freeHeight)
+                ) { content() }
+            } else {
+                val freeLeftPx = bounds.left.toFloat().coerceAtLeast(0f)
+                val freeRightPx = (screenWidthPx - bounds.right).coerceAtLeast(0f)
+                val onLeft = freeLeftPx >= freeRightPx
+                val freeWidth = with(density) { (if (onLeft) freeLeftPx else freeRightPx).toDp() }
+                Box(
+                    Modifier
+                        .align(if (onLeft) Alignment.TopStart else Alignment.TopEnd)
+                        .width(freeWidth)
+                        .fillMaxHeight()
+                ) { content() }
             }
         }
     }

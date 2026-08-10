@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -157,7 +160,18 @@ fun NeonToggle(
     }
 }
 
-/** Строка настройки: заголовок, пояснение и любой контрол справа. */
+/**
+ * Строка настройки: заголовок, пояснение и любой контрол.
+ *
+ * Раскладка сама решает, ставить ли контрол справа от текста в одну строку или
+ * под текстом отдельной строкой — по фактически доступной ширине контейнера
+ * (BoxWithConstraints), а не по ориентации экрана. Так одна и та же строка
+ * остаётся читаемой что на широком ландшафтном экране, что в портретной
+ * раскладке, что в узкой полосе настроек поверх карты в режиме «Во фрейме»:
+ * раньше control() всегда вставал в ту же строку, что заголовок, и на узкой
+ * ширине заголовок сжимался в нечитаемый столбик, а слайдеры/сегменты вылезали
+ * за границы панели.
+ */
 @Composable
 fun SettingRow(
     title: String,
@@ -165,19 +179,37 @@ fun SettingRow(
     accent: Color = LocalNeon.current.accent,
     control: @Composable () -> Unit
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            if (subtitle != null) {
-                Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val stacked = maxWidth < 380.dp
+        if (stacked) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp)
+            ) {
+                Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                if (subtitle != null) {
+                    Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                control()
+            }
+        } else {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    if (subtitle != null) {
+                        Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
+                    }
+                }
+                control()
             }
         }
-        control()
     }
     Box(
         Modifier
@@ -223,10 +255,14 @@ fun <T> NeonSegmented(
     modifier: Modifier = Modifier,
     onSelect: (T) -> Unit
 ) {
+    // horizontalScroll — защита от переполнения на узкой ширине (портрет, узкая
+    // полоса настроек поверх карты в режиме «Во фрейме»): раньше строка вариантов
+    // просто вылезала за границы панели вместо переноса.
     Row(
         modifier
             .background(Color(0xFF0C1424), RoundedCornerShape(14.dp))
             .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(14.dp))
+            .horizontalScroll(rememberScrollState())
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {

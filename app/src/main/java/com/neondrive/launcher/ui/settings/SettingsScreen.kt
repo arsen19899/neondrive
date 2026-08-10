@@ -10,9 +10,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
@@ -110,61 +112,117 @@ fun SettingsScreen(
         accent = accent,
         onBack = onBack
     ) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        val content: @Composable () -> Unit = {
+            when (tab) {
+                Tab.NAV -> NavTab(settings, accent, accent2, edit)
+                Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
+                Tab.RADIO -> RadioTab(accent, accent2)
+                Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
+                Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
+                Tab.WHEEL -> WheelTab(settings, accent, accent2, edit)
+                Tab.LOOK -> LookTab(settings, accent, accent2, edit)
+                Tab.SYSTEM -> SystemTab(settings, accent, accent2, edit)
+            }
+        }
 
-            // Вертикальные вкладки
-            Column(
-                Modifier
-                    .width(190.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Tab.entries.forEach { t ->
-                    val sel = t == tab
-                    Box(
+        // Порог по фактической ширине, а не по ориентации экрана: та же узкая
+        // раскладка нужна и в портрете, и в узкой полосе настроек поверх карты,
+        // когда навигатор поднят «во фрейме» и часть экрана занята его окном.
+        // Раньше боковая колонка вкладок съедала фиксированные 190dp — на узком
+        // экране контенту оставались крохи, а на совсем узкой полосе вкладки и
+        // подписи наезжали друг на друга и становились нечитаемы.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 560.dp
+
+            if (wide) {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(
                         Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .then(if (sel) Modifier.neonGlow(accent, 14.dp, 0.18f, 8.dp) else Modifier)
-                            .background(if (sel) accent.copy(alpha = 0.14f) else Color(0x220C1424))
-                            .border(
-                                1.dp,
-                                if (sel) accent.copy(alpha = 0.6f) else Color.Transparent,
-                                RoundedCornerShape(14.dp)
-                            )
-                            .clickable { tab = t }
-                            .padding(horizontal = 16.dp, vertical = 13.dp)
+                            .width(190.dp)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            t.title,
-                            color = if (sel) accent else Neon.TextMid,
-                            fontSize = 14.sp,
-                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
-                        )
+                        Tab.entries.forEach { t ->
+                            SettingsTabChip(
+                                title = t.title,
+                                selected = t == tab,
+                                accent = accent,
+                                fillWidth = true,
+                                onClick = { tab = t }
+                            )
+                        }
+                    }
+
+                    LazyColumn(
+                        Modifier.weight(1f).fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
+                        item { content() }
                     }
                 }
-            }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Tab.entries.forEach { t ->
+                            SettingsTabChip(
+                                title = t.title,
+                                selected = t == tab,
+                                accent = accent,
+                                fillWidth = false,
+                                onClick = { tab = t }
+                            )
+                        }
+                    }
 
-            // Содержимое
-            LazyColumn(
-                Modifier.weight(1f).fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp)
-            ) {
-                item {
-                    when (tab) {
-                        Tab.NAV -> NavTab(settings, accent, accent2, edit)
-                        Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
-                        Tab.RADIO -> RadioTab(accent, accent2)
-                        Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
-                        Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
-                        Tab.WHEEL -> WheelTab(settings, accent, accent2, edit)
-                        Tab.LOOK -> LookTab(settings, accent, accent2, edit)
-                        Tab.SYSTEM -> SystemTab(settings, accent, accent2, edit)
+                    Spacer(Modifier.height(12.dp))
+
+                    LazyColumn(
+                        Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
+                        item { content() }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsTabChip(
+    title: String,
+    selected: Boolean,
+    accent: Color,
+    fillWidth: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .clip(RoundedCornerShape(14.dp))
+            .then(if (selected) Modifier.neonGlow(accent, 14.dp, 0.18f, 8.dp) else Modifier)
+            .background(if (selected) accent.copy(alpha = 0.14f) else Color(0x220C1424))
+            .border(
+                1.dp,
+                if (selected) accent.copy(alpha = 0.6f) else Color.Transparent,
+                RoundedCornerShape(14.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp)
+    ) {
+        Text(
+            title,
+            color = if (selected) accent else Neon.TextMid,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1
+        )
     }
 }
 
@@ -1205,7 +1263,7 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
             }
         }
 
-        Hint("NeonDrive · версия 1.3.0", accent)
+        Hint("NeonDrive · версия 1.3.1", accent)
     }
 }
 
