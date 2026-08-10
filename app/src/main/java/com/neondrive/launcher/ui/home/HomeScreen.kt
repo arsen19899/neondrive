@@ -1,6 +1,8 @@
 package com.neondrive.launcher.ui.home
 
+import android.graphics.Rect
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,11 +14,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.neondrive.launcher.automation.FuelStationHub
 import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.automation.WeatherHub
@@ -73,10 +80,26 @@ fun HomeScreen(
     val connecting by PlayerHub.connectingYandex.collectAsState()
 
     // Пока навигатор поднят «во фрейме», настоящее приложение уже стоит ровно там,
-    // где раньше была карта-обманка — панель карты больше не нужна, а освободившееся
-    // место отдаём приборам. Док с часами при этом сохраняет свой размер.
+    // где раньше была карта-обманка, — панель-заглушка не рисуется. Но ячейка под
+    // неё в раскладке остаётся: именно её границы задают положение плавающего окна.
     val navFrameActive by MapFrameController.active.collectAsState()
     val mapCollapsed = navFrameActive && settings.mapMode == MapMode.FRAME
+
+    // Сменили сторону карты (или что-то ещё, что двигает ячейку) при уже поднятом
+    // фрейме — плавающее окно навигатора нужно переставить: само оно не переедет.
+    // Небольшая пауза даёт разметке пересобраться и сообщить новые границы ячейки,
+    // иначе окно уехало бы по старым.
+    val context = LocalContext.current
+    LaunchedEffect(
+        settings.mapSide,
+        settings.sidebarSide,
+        settings.showSpeedometer,
+        navFrameActive
+    ) {
+        if (!navFrameActive || settings.mapMode != MapMode.FRAME) return@LaunchedEffect
+        kotlinx.coroutines.delay(350)
+        MapFrameController.relaunchIfActive(context, settings)
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Портретный экран (планшет/ГУ, поставленный на попа) шире, чем выше —
@@ -139,16 +162,37 @@ fun HomeScreen(
         }
 
         val map: @Composable (Modifier) -> Unit = { m ->
-            // Карта — всё остальное пространство. Пока настоящий навигатор поднят
-            // во фрейме, панель-заглушка не нужна: реальное окно уже стоит на её месте.
-            if (!mapCollapsed) {
-                MapPanel(
-                    gps = gps,
-                    settings = settings,
-                    accent = accent,
-                    accent2 = accent2,
-                    modifier = m
-                )
+            // Ячейка карты занимает своё место ВСЕГДА, даже когда панель-заглушка
+            // не рисуется (настоящий навигатор уже стоит на этом месте плавающим
+            // окном). Раньше при поднятом фрейме ячейка просто исчезала из
+            // раскладки, и это ломало сразу три вещи: приборы расползались под
+            // окно навигатора и становились не видны; оболочка переставала знать
+            // границы ячейки, потому что сообщал их только сам MapPanel; и смена
+            // стороны карты ни на что не влияла — менять местами было нечего.
+            //
+            // Границы сообщаются отсюда, а не из MapPanel, именно поэтому: они
+            // нужны и тогда, когда заглушки нет. По ним считается свободная полоса
+            // для вторичных экранов (FrameSafeArea) и позиция плавающего окна.
+            Box(
+                m.onGloballyPositioned { coords ->
+                    val r = coords.boundsInWindow()
+                    MapFrameController.updateBounds(
+                        Rect(
+                            r.left.roundToInt(), r.top.roundToInt(),
+                            r.right.roundToInt(), r.bottom.roundToInt()
+                        )
+                    )
+                }
+            ) {
+                if (!mapCollapsed) {
+                    MapPanel(
+                        gps = gps,
+                        settings = settings,
+                        accent = accent,
+                        accent2 = accent2,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 
@@ -174,13 +218,14 @@ fun HomeScreen(
         } else {
             val columnWidth = maxWidth * 0.25f
 
-            // Колонка приборов: спидометр сверху, плеер снизу.
-            // Когда навигатор занял место карты, колонка растягивается на всё
-            // освободившееся пространство вместо фиксированной четверти экрана.
+            // Колонка приборов: спидометр сверху, плеер снизу. Ширина постоянная —
+            // раньше при поднятом фрейме колонка растягивалась «на освободившееся
+            // место», но освобождается ровно та область, куда встаёт плавающее окно
+            // навигатора, так что растянутые приборы просто уезжали под него.
             val instruments: @Composable RowScope.() -> Unit = {
                 Column(
                     Modifier
-                        .then(if (mapCollapsed) Modifier.weight(1f) else Modifier.width(columnWidth))
+                        .width(columnWidth)
                         .fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
