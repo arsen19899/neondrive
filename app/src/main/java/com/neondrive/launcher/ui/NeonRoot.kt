@@ -155,11 +155,7 @@ fun NeonRoot(
                                 },
                                 onOpenLibrary = { screen = NeonScreen.MUSIC },
                                 onPhone = { screen = NeonScreen.PHONE },
-                                // Тумблер, а не просто «запустить»: повторное нажатие
-                                // сворачивает фрейм. Иначе свернуть его изнутри
-                                // оболочки было нечем — панель карты с чипом
-                                // «Убрать панели» в режиме FRAME не рисуется.
-                                onNavigation = { MapFrameController.toggle(context, settings) },
+                                onNavigation = { MapFrameController.launch(context, settings) },
                                 onEqualizer = { screen = NeonScreen.EQUALIZER },
                                 onAndroidSettings = {
                                     runCatching {

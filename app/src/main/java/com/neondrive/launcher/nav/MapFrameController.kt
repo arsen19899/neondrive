@@ -74,13 +74,14 @@ object MapFrameController {
         }
     }
 
-    /** Выключить режим: убрать панели поверх карты / считать фрейм свёрнутым. */
+    /** Выключить режим: убрать панели поверх карты. */
     fun stop(context: Context) {
         NeonOverlayService.hide(context)
         _active.value = false
     }
 
     /**
+<<<<<<< HEAD
      * Кнопка «Навигация» в доке работает как тумблер: карта поднята — сворачиваем,
      * свёрнута — поднимаем.
      *
@@ -148,6 +149,8 @@ object MapFrameController {
     private var lastLaunchBounds = Rect()
 
     /**
+=======
+>>>>>>> parent of 5eab26a (Add files via upload)
      * Автозапуск при старте оболочки. Ждём, пока панель сообщит свои границы,
      * иначе плавающее окно откроется не туда.
      */

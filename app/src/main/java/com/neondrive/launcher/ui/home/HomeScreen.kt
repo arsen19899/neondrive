@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -218,11 +217,25 @@ fun HomeScreen(
         } else {
             val columnWidth = maxWidth * 0.25f
 
+<<<<<<< HEAD
             // Колонка приборов: спидометр сверху, плеер снизу. Ширина постоянная —
             // раньше при поднятом фрейме колонка растягивалась «на освободившееся
             // место», но освобождается ровно та область, куда встаёт плавающее окно
             // навигатора, так что растянутые приборы просто уезжали под него.
             val instruments: @Composable RowScope.() -> Unit = {
+=======
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (settings.sidebarSide == SidebarSide.LEFT) dock(Modifier.fillMaxHeight())
+
+                // Колонка приборов: спидометр сверху, плеер снизу.
+                // Когда навигатор занял место карты, колонка растягивается на всё
+                // освободившееся пространство вместо фиксированной четверти экрана.
+>>>>>>> parent of 5eab26a (Add files via upload)
                 Column(
                     Modifier
                         .width(columnWidth)
@@ -232,37 +245,12 @@ fun HomeScreen(
                     driveInfo()
                     player(Modifier.weight(1f))
                 }
-            }
 
-            val mapCell: @Composable RowScope.() -> Unit = {
                 map(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
                 )
-            }
-
-            Row(
-                Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (settings.sidebarSide == SidebarSide.LEFT) dock(Modifier.fillMaxHeight())
-
-                // Сторона карты относительно приборов настраивается отдельно от
-                // стороны дока: на разных ГУ удобной оказывается разная комбинация
-                // (руль слева/справа, экран смещён к водителю). Свободная полоса,
-                // в которую вписываются вторичные экраны при поднятом фрейме,
-                // считается по фактическим границам панели карты, поэтому оба
-                // варианта отрабатывают одинаково — см. FrameSafeArea в NeonRoot.
-                if (settings.mapSide == SidebarSide.LEFT) {
-                    mapCell()
-                    instruments()
-                } else {
-                    instruments()
-                    mapCell()
-                }
 
                 if (settings.sidebarSide == SidebarSide.RIGHT) dock(Modifier.fillMaxHeight())
             }
