@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,6 +26,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +41,18 @@ import com.neondrive.launcher.ui.theme.LocalNeon
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonGlow
 import com.neondrive.launcher.ui.theme.neonPanel
+
+/**
+ * Единый сигнал «компактный интерфейс» — портретный экран или карта, поднятая
+ * «во фрейме» (часть экрана занята плавающим окном навигатора, полезная полоса
+ * узкая). Вычисляется один раз в [com.neondrive.launcher.ui.NeonRoot] по
+ * фактической ориентации экрана и состоянию [com.neondrive.launcher.nav.MapFrameController],
+ * а не угадывается на месте по измеренной ширине — так поведение предсказуемо
+ * совпадает с той же логикой, что уже использует рабочий стол (HomeScreen),
+ * и не переключается случайно на широких, но чуть более узких ландшафтных
+ * экранах.
+ */
+val LocalCompactUi = compositionLocalOf { false }
 
 /** Заголовок-«трафарет» в стиле HUD. */
 @Composable
@@ -163,14 +175,11 @@ fun NeonToggle(
 /**
  * Строка настройки: заголовок, пояснение и любой контрол.
  *
- * Раскладка сама решает, ставить ли контрол справа от текста в одну строку или
- * под текстом отдельной строкой — по фактически доступной ширине контейнера
- * (BoxWithConstraints), а не по ориентации экрана. Так одна и та же строка
- * остаётся читаемой что на широком ландшафтном экране, что в портретной
- * раскладке, что в узкой полосе настроек поверх карты в режиме «Во фрейме»:
- * раньше control() всегда вставал в ту же строку, что заголовок, и на узкой
- * ширине заголовок сжимался в нечитаемый столбик, а слайдеры/сегменты вылезали
- * за границы панели.
+ * Раскладка решает, ставить ли контрол справа от текста в одну строку или под
+ * текстом отдельной строкой, по [LocalCompactUi] — тому же сигналу «портрет
+ * или карта во фрейме», что и весь остальной интерфейс настроек. На обычном
+ * ландшафтном экране без фрейма раскладка ровно та, что была изначально:
+ * контрол в той же строке, что заголовок.
  */
 @Composable
 fun SettingRow(
@@ -179,36 +188,33 @@ fun SettingRow(
     accent: Color = LocalNeon.current.accent,
     control: @Composable () -> Unit
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val stacked = maxWidth < 380.dp
-        if (stacked) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp)
-            ) {
+    if (LocalCompactUi.current) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp)
+        ) {
+            Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            control()
+        }
+    } else {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 if (subtitle != null) {
                     Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
                 }
-                Spacer(Modifier.height(10.dp))
-                control()
             }
-        } else {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    if (subtitle != null) {
-                        Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
-                    }
-                }
-                control()
-            }
+            control()
         }
     }
     Box(

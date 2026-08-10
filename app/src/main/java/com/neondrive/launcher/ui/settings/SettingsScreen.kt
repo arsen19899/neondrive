@@ -10,7 +10,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -68,6 +67,7 @@ import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.overlay.NeonOverlayService
 import com.neondrive.launcher.system.DefaultLauncherHelper
 import com.neondrive.launcher.ui.common.HudLabel
+import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.common.NeonSegmented
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
 import com.neondrive.launcher.ui.common.NeonSlider
@@ -125,69 +125,64 @@ fun SettingsScreen(
             }
         }
 
-        // Порог по фактической ширине, а не по ориентации экрана: та же узкая
-        // раскладка нужна и в портрете, и в узкой полосе настроек поверх карты,
-        // когда навигатор поднят «во фрейме» и часть экрана занята его окном.
-        // Раньше боковая колонка вкладок съедала фиксированные 190dp — на узком
-        // экране контенту оставались крохи, а на совсем узкой полосе вкладки и
-        // подписи наезжали друг на друга и становились нечитаемы.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val wide = maxWidth >= 560.dp
-
-            if (wide) {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column(
-                        Modifier
-                            .width(190.dp)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Tab.entries.forEach { t ->
-                            SettingsTabChip(
-                                title = t.title,
-                                selected = t == tab,
-                                accent = accent,
-                                fillWidth = true,
-                                onClick = { tab = t }
-                            )
-                        }
-                    }
-
-                    LazyColumn(
-                        Modifier.weight(1f).fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 24.dp)
-                    ) {
-                        item { content() }
+        // compact — тот же сигнал «портрет или карта во фрейме», что и у всего
+        // остального интерфейса (см. LocalCompactUi). На обычном ландшафтном
+        // экране без фрейма раскладка не меняется — боковая колонка вкладок
+        // шириной 190dp, как и было всегда.
+        val compact = LocalCompactUi.current
+        if (!compact) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    Modifier
+                        .width(190.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Tab.entries.forEach { t ->
+                        SettingsTabChip(
+                            title = t.title,
+                            selected = t == tab,
+                            accent = accent,
+                            fillWidth = true,
+                            onClick = { tab = t }
+                        )
                     }
                 }
-            } else {
-                Column(Modifier.fillMaxSize()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Tab.entries.forEach { t ->
-                            SettingsTabChip(
-                                title = t.title,
-                                selected = t == tab,
-                                accent = accent,
-                                fillWidth = false,
-                                onClick = { tab = t }
-                            )
-                        }
-                    }
 
-                    Spacer(Modifier.height(12.dp))
-
-                    LazyColumn(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        contentPadding = PaddingValues(bottom = 24.dp)
-                    ) {
-                        item { content() }
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    item { content() }
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Tab.entries.forEach { t ->
+                        SettingsTabChip(
+                            title = t.title,
+                            selected = t == tab,
+                            accent = accent,
+                            fillWidth = false,
+                            onClick = { tab = t }
+                        )
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    item { content() }
                 }
             }
         }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,6 +38,7 @@ import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.ui.apps.AllAppsScreen
+import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.eq.EqualizerScreen
 import com.neondrive.launcher.ui.home.HomeScreen
 import com.neondrive.launcher.ui.music.MusicScreen
@@ -99,94 +101,108 @@ fun NeonRoot(
         backgroundImagePath = settings.backgroundImagePath,
         backgroundDarken = settings.backgroundDarken
     ) {
-        AnimatedContent(
-            targetState = screen,
-            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
-            label = "screen",
-            modifier = Modifier.fillMaxSize()
-        ) { target ->
-            when (target) {
-                NeonScreen.HOME -> HomeScreen(
-                    settings = settings,
-                    accent = accent,
-                    accent2 = accent2,
-                    gps = gps,
-                    now = now,
-                    source = source,
-                    volumePercent = volume,
-                    speedGainPercent = automation.speedGainPercent,
-                    current = screen,
-                    onSource = { s ->
-                        when (s) {
-                            MusicSource.DEVICE ->
-                                PlayerHub.tracks.value.takeIf { it.isNotEmpty() }
-                                    ?.let { PlayerHub.playTracks(it, 0) }
-                                    ?: run { screen = NeonScreen.MUSIC }
-                            MusicSource.RADIO ->
-                                PlayerHub.stations.value.firstOrNull()?.let { PlayerHub.playStation(it) }
-                            MusicSource.YANDEX -> PlayerHub.switchToYandex(launchApp = true)
-                        }
-                    },
-                    onPlayPause = { PlayerHub.playPause() },
-                    onNext = { PlayerHub.next() },
-                    onPrev = { PlayerHub.prev() },
-                    onVolume = { up -> PlayerHub.nudgeVolume(up); volume = PlayerHub.volumePercent() },
-                    onOpenLibrary = { screen = NeonScreen.MUSIC },
-                    onPhone = { screen = NeonScreen.PHONE },
-                    onNavigation = { MapFrameController.launch(context, settings) },
-                    onEqualizer = { screen = NeonScreen.EQUALIZER },
-                    onAndroidSettings = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Settings.ACTION_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // compact — единый сигнал для всех вторичных экранов: портретный экран
+        // (та же проверка, что и на рабочем столе в HomeScreen) ИЛИ карта поднята
+        // «во фрейме» (часть экрана занята плавающим окном навигатора, а под
+        // настройки остаётся узкая полоса). На обычном ландшафтном экране без
+        // фрейма ничего не меняется — интерфейс ровно тот, что был всегда.
+        val frameActive by MapFrameController.active.collectAsState()
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val isPortrait = maxHeight > maxWidth
+            val compact = isPortrait || (frameActive && settings.mapMode == MapMode.FRAME)
+
+            CompositionLocalProvider(LocalCompactUi provides compact) {
+                AnimatedContent(
+                    targetState = screen,
+                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+                    label = "screen",
+                    modifier = Modifier.fillMaxSize()
+                ) { target ->
+                    when (target) {
+                        NeonScreen.HOME -> HomeScreen(
+                            settings = settings,
+                            accent = accent,
+                            accent2 = accent2,
+                            gps = gps,
+                            now = now,
+                            source = source,
+                            volumePercent = volume,
+                            speedGainPercent = automation.speedGainPercent,
+                            current = screen,
+                            onSource = { s ->
+                                when (s) {
+                                    MusicSource.DEVICE ->
+                                        PlayerHub.tracks.value.takeIf { it.isNotEmpty() }
+                                            ?.let { PlayerHub.playTracks(it, 0) }
+                                            ?: run { screen = NeonScreen.MUSIC }
+                                    MusicSource.RADIO ->
+                                        PlayerHub.stations.value.firstOrNull()
+                                            ?.let { PlayerHub.playStation(it) }
+                                    MusicSource.YANDEX -> PlayerHub.switchToYandex(launchApp = true)
+                                }
+                            },
+                            onPlayPause = { PlayerHub.playPause() },
+                            onNext = { PlayerHub.next() },
+                            onPrev = { PlayerHub.prev() },
+                            onVolume = { up -> PlayerHub.nudgeVolume(up); volume = PlayerHub.volumePercent() },
+                            onOpenLibrary = { screen = NeonScreen.MUSIC },
+                            onPhone = { screen = NeonScreen.PHONE },
+                            onNavigation = { MapFrameController.launch(context, settings) },
+                            onEqualizer = { screen = NeonScreen.EQUALIZER },
+                            onAndroidSettings = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_SETTINGS)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            },
+                            onAllApps = { screen = NeonScreen.APPS },
+                            onLauncherSettings = { screen = NeonScreen.SETTINGS }
+                        )
+
+                        NeonScreen.APPS -> FrameSafeArea(settings) {
+                            AllAppsScreen(
+                                accent = accent,
+                                accent2 = accent2,
+                                onBack = { screen = NeonScreen.HOME }
                             )
                         }
-                    },
-                    onAllApps = { screen = NeonScreen.APPS },
-                    onLauncherSettings = { screen = NeonScreen.SETTINGS }
-                )
 
-                NeonScreen.APPS -> FrameSafeArea(settings) {
-                    AllAppsScreen(
-                        accent = accent,
-                        accent2 = accent2,
-                        onBack = { screen = NeonScreen.HOME }
-                    )
-                }
+                        NeonScreen.MUSIC -> FrameSafeArea(settings) {
+                            MusicScreen(
+                                accent = accent,
+                                accent2 = accent2,
+                                onBack = { screen = NeonScreen.HOME }
+                            )
+                        }
 
-                NeonScreen.MUSIC -> FrameSafeArea(settings) {
-                    MusicScreen(
-                        accent = accent,
-                        accent2 = accent2,
-                        onBack = { screen = NeonScreen.HOME }
-                    )
-                }
+                        NeonScreen.EQUALIZER -> FrameSafeArea(settings) {
+                            EqualizerScreen(
+                                accent = accent,
+                                accent2 = accent2,
+                                onBack = { screen = NeonScreen.HOME }
+                            )
+                        }
 
-                NeonScreen.EQUALIZER -> FrameSafeArea(settings) {
-                    EqualizerScreen(
-                        accent = accent,
-                        accent2 = accent2,
-                        onBack = { screen = NeonScreen.HOME }
-                    )
-                }
+                        NeonScreen.PHONE -> FrameSafeArea(settings) {
+                            PhoneScreen(
+                                accent = accent,
+                                accent2 = accent2,
+                                onBack = { screen = NeonScreen.HOME }
+                            )
+                        }
 
-                NeonScreen.PHONE -> FrameSafeArea(settings) {
-                    PhoneScreen(
-                        accent = accent,
-                        accent2 = accent2,
-                        onBack = { screen = NeonScreen.HOME }
-                    )
-                }
-
-                NeonScreen.SETTINGS -> FrameSafeArea(settings) {
-                    SettingsScreen(
-                        settings = settings,
-                        accent = accent,
-                        accent2 = accent2,
-                        onBack = { screen = NeonScreen.HOME },
-                        edit = { block -> scope.launch { block(repo) } }
-                    )
+                        NeonScreen.SETTINGS -> FrameSafeArea(settings) {
+                            SettingsScreen(
+                                settings = settings,
+                                accent = accent,
+                                accent2 = accent2,
+                                onBack = { screen = NeonScreen.HOME },
+                                edit = { block -> scope.launch { block(repo) } }
+                            )
+                        }
+                    }
                 }
             }
         }
