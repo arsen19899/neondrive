@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,7 +24,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,18 +38,6 @@ import com.neondrive.launcher.ui.theme.LocalNeon
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonGlow
 import com.neondrive.launcher.ui.theme.neonPanel
-
-/**
- * Единый сигнал «компактный интерфейс» — портретный экран или карта, поднятая
- * «во фрейме» (часть экрана занята плавающим окном навигатора, полезная полоса
- * узкая). Вычисляется один раз в [com.neondrive.launcher.ui.NeonRoot] по
- * фактической ориентации экрана и состоянию [com.neondrive.launcher.nav.MapFrameController],
- * а не угадывается на месте по измеренной ширине — так поведение предсказуемо
- * совпадает с той же логикой, что уже использует рабочий стол (HomeScreen),
- * и не переключается случайно на широких, но чуть более узких ландшафтных
- * экранах.
- */
-val LocalCompactUi = compositionLocalOf { false }
 
 /** Заголовок-«трафарет» в стиле HUD. */
 @Composable
@@ -172,15 +157,7 @@ fun NeonToggle(
     }
 }
 
-/**
- * Строка настройки: заголовок, пояснение и любой контрол.
- *
- * Раскладка решает, ставить ли контрол справа от текста в одну строку или под
- * текстом отдельной строкой, по [LocalCompactUi] — тому же сигналу «портрет
- * или карта во фрейме», что и весь остальной интерфейс настроек. На обычном
- * ландшафтном экране без фрейма раскладка ровно та, что была изначально:
- * контрол в той же строке, что заголовок.
- */
+/** Строка настройки: заголовок, пояснение и любой контрол справа. */
 @Composable
 fun SettingRow(
     title: String,
@@ -188,34 +165,19 @@ fun SettingRow(
     accent: Color = LocalNeon.current.accent,
     control: @Composable () -> Unit
 ) {
-    if (LocalCompactUi.current) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 10.dp)
-        ) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
                 Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
             }
-            Spacer(Modifier.height(10.dp))
-            control()
         }
-    } else {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text(title, color = Neon.TextHi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                if (subtitle != null) {
-                    Text(subtitle, color = Neon.TextLow, fontSize = 12.sp, lineHeight = 15.sp)
-                }
-            }
-            control()
-        }
+        control()
     }
     Box(
         Modifier
@@ -261,14 +223,10 @@ fun <T> NeonSegmented(
     modifier: Modifier = Modifier,
     onSelect: (T) -> Unit
 ) {
-    // horizontalScroll — защита от переполнения на узкой ширине (портрет, узкая
-    // полоса настроек поверх карты в режиме «Во фрейме»): раньше строка вариантов
-    // просто вылезала за границы панели вместо переноса.
     Row(
         modifier
             .background(Color(0xFF0C1424), RoundedCornerShape(14.dp))
             .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(14.dp))
-            .horizontalScroll(rememberScrollState())
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
