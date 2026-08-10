@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.media.AudioFxController
 import com.neondrive.launcher.ui.common.HudLabel
+import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.common.NeonCard
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
 import com.neondrive.launcher.ui.common.NeonSlider
@@ -63,84 +65,181 @@ fun EqualizerScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
             }
         }
     ) {
-        Row(
-            Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        if (LocalCompactUi.current) {
+            CompactEqualizer(eq = eq, accent = accent, accent2 = accent2)
+        } else {
+            WideEqualizer(eq = eq, accent = accent, accent2 = accent2)
+        }
+    }
+}
+
+/** Исходная раскладка — ровно как до адаптивных правок, без изменений. */
+@Composable
+private fun WideEqualizer(eq: com.neondrive.launcher.media.EqState, accent: Color, accent2: Color) {
+    Row(
+        Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Полосы
+        NeonCard(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            accent = accent
         ) {
-            // Полосы
-            NeonCard(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                accent = accent
+            HudLabel("Полосы", accent)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                HudLabel("Полосы", accent)
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    eq.bands.forEach { band ->
-                        BandSlider(
-                            hz = band.centerHz,
-                            level = band.levelMb.toInt(),
-                            min = eq.minLevelMb.toInt(),
-                            max = eq.maxLevelMb.toInt(),
-                            accent = accent,
-                            accent2 = accent2
-                        ) { AudioFxController.setBand(band.index, it.toShort()) }
-                    }
-                    if (eq.bands.isEmpty()) {
-                        Text(
-                            "Полосы не обнаружены",
-                            color = Neon.TextLow,
-                            fontSize = 13.sp,
-                            modifier = Modifier.align(Alignment.CenterVertically)
-                        )
-                    }
+                eq.bands.forEach { band ->
+                    BandSlider(
+                        hz = band.centerHz,
+                        level = band.levelMb.toInt(),
+                        min = eq.minLevelMb.toInt(),
+                        max = eq.maxLevelMb.toInt(),
+                        accent = accent,
+                        accent2 = accent2
+                    ) { AudioFxController.setBand(band.index, it.toShort()) }
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Chip("Плоско", accent, false) { AudioFxController.flatten() }
-                    eq.presets.forEachIndexed { i, name ->
-                        Chip(name, accent2, eq.currentPreset == i) { AudioFxController.applyPreset(i) }
-                    }
+                if (eq.bands.isEmpty()) {
+                    Text(
+                        "Полосы не обнаружены",
+                        color = Neon.TextLow,
+                        fontSize = 13.sp,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
                 }
             }
-
-            // Эффекты
-            NeonCard(
-                modifier = Modifier
-                    .width(300.dp)
-                    .fillMaxHeight(),
-                accent = accent2
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                HudLabel("Эффекты", accent2)
-                Spacer(Modifier.height(14.dp))
-
-                FxSlider("Бас", eq.bassBoost, 0..1000, accent2) { AudioFxController.setBassBoost(it) }
-                FxSlider("Объём", eq.virtualizer, 0..1000, accent) { AudioFxController.setVirtualizer(it) }
-                FxSlider("Громкость (loudness)", eq.loudness, 0..1500, accent2) {
-                    AudioFxController.setLoudness(it)
+                Chip("Плоско", accent, false) { AudioFxController.flatten() }
+                eq.presets.forEachIndexed { i, name ->
+                    Chip(name, accent2, eq.currentPreset == i) { AudioFxController.applyPreset(i) }
                 }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Эффекты применяются к встроенному плееру оболочки. На части головных " +
-                        "устройств прошивка отдаёт глобальную аудиосессию — тогда настройки " +
-                        "действуют и на сторонние приложения, включая Яндекс.Музыку.",
-                    color = Neon.TextLow,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp
-                )
             }
+        }
+
+        // Эффекты
+        NeonCard(
+            modifier = Modifier
+                .width(300.dp)
+                .fillMaxHeight(),
+            accent = accent2
+        ) {
+            HudLabel("Эффекты", accent2)
+            Spacer(Modifier.height(14.dp))
+
+            FxSlider("Бас", eq.bassBoost, 0..1000, accent2) { AudioFxController.setBassBoost(it) }
+            FxSlider("Объём", eq.virtualizer, 0..1000, accent) { AudioFxController.setVirtualizer(it) }
+            FxSlider("Громкость (loudness)", eq.loudness, 0..1500, accent2) {
+                AudioFxController.setLoudness(it)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Эффекты применяются к встроенному плееру оболочки. На части головных " +
+                    "устройств прошивка отдаёт глобальную аудиосессию — тогда настройки " +
+                    "действуют и на сторонние приложения, включая Яндекс.Музыку.",
+                color = Neon.TextLow,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+/**
+ * Компактная раскладка — портретный экран или карта во фрейме (узкая полоса,
+ * фиксированная 300dp карточка эффектов рядом с полосами туда просто не влезала
+ * бы). Пресеты — первыми и на всю ширину, чтобы одним касанием задать характер
+ * звука, ниже — полосы, ещё ниже — бас/объём/громкость. Всё в один
+ * вертикально скроллящийся столбец.
+ */
+@Composable
+private fun CompactEqualizer(eq: com.neondrive.launcher.media.EqState, accent: Color, accent2: Color) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Пресеты — на всю ширину и первыми
+        NeonCard(modifier = Modifier.fillMaxWidth(), accent = accent2) {
+            HudLabel("Пресеты", accent2)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Chip("Плоско", accent, false) { AudioFxController.flatten() }
+                eq.presets.forEachIndexed { i, name ->
+                    Chip(name, accent2, eq.currentPreset == i) { AudioFxController.applyPreset(i) }
+                }
+            }
+        }
+
+        // Полосы — под пресетами
+        NeonCard(modifier = Modifier.fillMaxWidth(), accent = accent) {
+            HudLabel("Полосы", accent)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                eq.bands.forEach { band ->
+                    BandSlider(
+                        hz = band.centerHz,
+                        level = band.levelMb.toInt(),
+                        min = eq.minLevelMb.toInt(),
+                        max = eq.maxLevelMb.toInt(),
+                        accent = accent,
+                        accent2 = accent2
+                    ) { AudioFxController.setBand(band.index, it.toShort()) }
+                }
+                if (eq.bands.isEmpty()) {
+                    Text(
+                        "Полосы не обнаружены",
+                        color = Neon.TextLow,
+                        fontSize = 13.sp,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                }
+            }
+        }
+
+        // Эффекты — ещё ниже
+        NeonCard(modifier = Modifier.fillMaxWidth(), accent = accent2) {
+            HudLabel("Эффекты", accent2)
+            Spacer(Modifier.height(14.dp))
+
+            FxSlider("Бас", eq.bassBoost, 0..1000, accent2) { AudioFxController.setBassBoost(it) }
+            FxSlider("Объём", eq.virtualizer, 0..1000, accent) { AudioFxController.setVirtualizer(it) }
+            FxSlider("Громкость (loudness)", eq.loudness, 0..1500, accent2) {
+                AudioFxController.setLoudness(it)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Эффекты применяются к встроенному плееру оболочки. На части головных " +
+                    "устройств прошивка отдаёт глобальную аудиосессию — тогда настройки " +
+                    "действуют и на сторонние приложения, включая Яндекс.Музыку.",
+                color = Neon.TextLow,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }

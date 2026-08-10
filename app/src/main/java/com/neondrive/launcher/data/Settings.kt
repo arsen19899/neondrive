@@ -183,6 +183,14 @@ data class LauncherSettings(
     /** ADC-значение -> действие. */
     val swcAdcMap: Map<Int, SwcAction> = emptyMap(),
 
+    /**
+     * MAC-адрес выбранного пользователем «телефонного» Bluetooth-устройства —
+     * настройки → Bluetooth. Пусто — устройство не выбрано явно, оболочка
+     * определяет подключённый телефон по первому Bluetooth-профилю HEADSET,
+     * как и раньше.
+     */
+    val phoneBluetoothAddress: String = "",
+
     /* Прочее */
     val startOnBoot: Boolean = true,
     /** Поднимать оболочку при каждом включении экрана — «пробуждении» магнитолы. */

@@ -123,6 +123,33 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!--
+             Свой экран звонка вместо системного «Телефона» (см. CallOverlay).
+             android.telecom.InCallService — тот же официальный механизм, которым
+             Android Auto и подобные автомобильные оболочки показывают звонок
+             своим интерфейсом, не становясь при этом приложением-телефоном
+             по умолчанию. IN_CALL_SERVICE_CAR_MODE_UI сообщает Telecom, что
+             сервис умеет рисовать экран звонка в автомобильном режиме —
+             NeonApp включает этот режим (UiModeManager.enableCarMode) при
+             старте оболочки, раз она и есть замена рабочего стола ГУ.
+             android:permission обязателен и защищён системой — сторонний
+             компонент не может забиндиться к сервису напрямую.
+        -->
+        <service
+            android:name=".phone.NeonInCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_UI"
+                android:value="false" />
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_CAR_MODE_UI"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
+
         <!-- Панели оболочки поверх карты -->
         <service
             android:name=".overlay.NeonOverlayService"

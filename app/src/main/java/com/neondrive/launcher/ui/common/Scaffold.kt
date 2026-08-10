@@ -3,6 +3,7 @@ package com.neondrive.launcher.ui.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -39,6 +41,14 @@ fun NeonScreenScaffold(
     actions: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
+    // В компактном режиме (портрет или карта во фрейме) шапка перестраивается:
+    // actions — поиск, сегменты источников, тумблеры — уезжают отдельной строкой
+    // под заголовок и прокручиваются по горизонтали. Раньше они стояли в одну
+    // строку с названием экрана и на узкой ширине либо сжимали заголовок до
+    // нечитаемого, либо сами обрезались за краем панели. На широком ландшафтном
+    // экране без фрейма шапка ровно та же, что была.
+    val compact = LocalCompactUi.current
+
     Column(
         Modifier
             .fillMaxSize()
@@ -64,7 +74,7 @@ fun NeonScreenScaffold(
                 Text(
                     title.uppercase(),
                     color = Neon.TextHi,
-                    fontSize = 22.sp,
+                    fontSize = if (compact) 18.sp else 22.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 2.sp
                 )
@@ -73,7 +83,19 @@ fun NeonScreenScaffold(
                 }
             }
 
-            actions()
+            if (!compact) actions()
+        }
+
+        if (compact) {
+            Spacer(Modifier.size(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                actions()
+            }
         }
 
         Spacer(Modifier.size(14.dp))

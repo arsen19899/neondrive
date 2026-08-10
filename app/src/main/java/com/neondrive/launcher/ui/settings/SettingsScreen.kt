@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,8 +66,11 @@ import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.overlay.NeonOverlayService
+import com.neondrive.launcher.phone.BluetoothDevicesRepository
+import com.neondrive.launcher.phone.PairedBtDevice
 import com.neondrive.launcher.system.DefaultLauncherHelper
 import com.neondrive.launcher.ui.common.HudLabel
+import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.common.NeonSegmented
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
 import com.neondrive.launcher.ui.common.NeonSlider
@@ -90,6 +95,7 @@ private enum class Tab(val title: String) {
     REACTIONS("Реакции"),
     SPEED("Скорость"),
     WHEEL("Кнопки руля"),
+    BLUETOOTH("Bluetooth"),
     LOOK("Внешний вид"),
     SYSTEM("Система")
 }
@@ -110,61 +116,113 @@ fun SettingsScreen(
         accent = accent,
         onBack = onBack
     ) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        val content: @Composable () -> Unit = {
+            when (tab) {
+                Tab.NAV -> NavTab(settings, accent, accent2, edit)
+                Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
+                Tab.RADIO -> RadioTab(accent, accent2)
+                Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
+                Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
+                Tab.WHEEL -> WheelTab(settings, accent, accent2, edit)
+                Tab.BLUETOOTH -> BluetoothTab(settings, accent, accent2, edit)
+                Tab.LOOK -> LookTab(settings, accent, accent2, edit)
+                Tab.SYSTEM -> SystemTab(settings, accent, accent2, edit)
+            }
+        }
 
-            // Вертикальные вкладки
-            Column(
-                Modifier
-                    .width(190.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Tab.entries.forEach { t ->
-                    val sel = t == tab
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .then(if (sel) Modifier.neonGlow(accent, 14.dp, 0.18f, 8.dp) else Modifier)
-                            .background(if (sel) accent.copy(alpha = 0.14f) else Color(0x220C1424))
-                            .border(
-                                1.dp,
-                                if (sel) accent.copy(alpha = 0.6f) else Color.Transparent,
-                                RoundedCornerShape(14.dp)
-                            )
-                            .clickable { tab = t }
-                            .padding(horizontal = 16.dp, vertical = 13.dp)
-                    ) {
-                        Text(
-                            t.title,
-                            color = if (sel) accent else Neon.TextMid,
-                            fontSize = 14.sp,
-                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+        // compact — тот же сигнал «портрет или карта во фрейме», что и у всего
+        // остального интерфейса (см. LocalCompactUi). На обычном ландшафтном
+        // экране без фрейма раскладка не меняется — боковая колонка вкладок
+        // шириной 190dp, как и было всегда.
+        val compact = LocalCompactUi.current
+        if (!compact) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    Modifier
+                        .width(190.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Tab.entries.forEach { t ->
+                        SettingsTabChip(
+                            title = t.title,
+                            selected = t == tab,
+                            accent = accent,
+                            fillWidth = true,
+                            onClick = { tab = t }
                         )
                     }
                 }
-            }
 
-            // Содержимое
-            LazyColumn(
-                Modifier.weight(1f).fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp)
-            ) {
-                item {
-                    when (tab) {
-                        Tab.NAV -> NavTab(settings, accent, accent2, edit)
-                        Tab.MUSIC -> MusicTab(settings, accent, accent2, edit)
-                        Tab.RADIO -> RadioTab(accent, accent2)
-                        Tab.REACTIONS -> ReactionsTab(settings, accent, accent2, edit)
-                        Tab.SPEED -> SpeedTab(settings, accent, accent2, edit)
-                        Tab.WHEEL -> WheelTab(settings, accent, accent2, edit)
-                        Tab.LOOK -> LookTab(settings, accent, accent2, edit)
-                        Tab.SYSTEM -> SystemTab(settings, accent, accent2, edit)
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    item { content() }
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Tab.entries.forEach { t ->
+                        SettingsTabChip(
+                            title = t.title,
+                            selected = t == tab,
+                            accent = accent,
+                            fillWidth = false,
+                            onClick = { tab = t }
+                        )
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    item { content() }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsTabChip(
+    title: String,
+    selected: Boolean,
+    accent: Color,
+    fillWidth: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .clip(RoundedCornerShape(14.dp))
+            .then(if (selected) Modifier.neonGlow(accent, 14.dp, 0.18f, 8.dp) else Modifier)
+            .background(if (selected) accent.copy(alpha = 0.14f) else Color(0x220C1424))
+            .border(
+                1.dp,
+                if (selected) accent.copy(alpha = 0.6f) else Color.Transparent,
+                RoundedCornerShape(14.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp)
+    ) {
+        Text(
+            title,
+            color = if (selected) accent else Neon.TextMid,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1
+        )
     }
 }
 
@@ -833,6 +891,148 @@ private val KNOWN_ADC_PATHS = listOf(
     "/dev/swc_adc"
 )
 
+/* ═════════════════════  BLUETOOTH  ═════════════════════ */
+
+/**
+ * Список сопряжённых Bluetooth-устройств и выбор, какое из них считать
+ * «телефоном» — оболочка использует это для подписей на экране «Телефон» и как
+ * более надёжную замену прежней эвристике «первое сопряжённое устройство».
+ *
+ * Самого подключения здесь нет и быть не может: Android не даёт стороннему
+ * приложению без системных прав программно подключить уже сопряжённое
+ * Bluetooth-устройство — это ограничение платформы, не оболочки (см. пояснение
+ * ниже и комментарий в BluetoothDevicesRepository).
+ */
+@Composable
+private fun BluetoothTab(s: LauncherSettings, accent: Color, accent2: Color, edit: SettingsEdit) {
+    val context = LocalContext.current
+    val granted = BluetoothDevicesRepository.hasPermission(context)
+    val scope = rememberCoroutineScope()
+    var devices by remember { mutableStateOf<List<PairedBtDevice>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    suspend fun refresh() {
+        loading = true
+        devices = BluetoothDevicesRepository.list(context)
+        loading = false
+    }
+
+    LaunchedEffect(granted) {
+        if (granted) refresh() else loading = false
+    }
+
+    Column {
+        if (!granted) {
+            WarningCard(
+                "Нужен доступ к Bluetooth",
+                "Без разрешения «Устройства поблизости» оболочка не увидит список " +
+                    "сопряжённых устройств. Откройте разрешения приложения и выдайте его.",
+                accent2
+            ) {
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
+        SettingsSection("Устройство-телефон", accent) {
+            SettingRow(
+                "Список сопряжённых устройств",
+                "Отметьте то, что считать телефоном — от этого зависят подписи в «Телефоне» " +
+                    "и распознавание уведомлений с телефона во вкладке «Реакции»",
+                accent
+            ) {
+                SmallButton(if (loading) "Ищем…" else "Обновить", accent2) {
+                    scope.launch { refresh() }
+                }
+            }
+
+            when {
+                loading -> Hint("Ищем сопряжённые устройства…", accent2)
+                devices.isEmpty() -> Hint(
+                    "Сопряжённых устройств не найдено. Сопрягите телефон в системных " +
+                        "настройках Bluetooth головного устройства, затем нажмите «Обновить».",
+                    accent2
+                )
+                else -> devices.forEach { d ->
+                    BtDeviceRow(
+                        device = d,
+                        selected = d.address == s.phoneBluetoothAddress,
+                        accent = accent,
+                        accent2 = accent2
+                    ) {
+                        edit { it.setPhoneBluetoothAddress(d.address) }
+                    }
+                }
+            }
+
+            if (s.phoneBluetoothAddress.isNotBlank() && devices.none { it.address == s.phoneBluetoothAddress }) {
+                Hint(
+                    "Выбранное устройство сейчас не видно среди сопряжённых — " +
+                        "проверьте, не отвязали ли его на телефоне.",
+                    Neon.Amber
+                )
+            }
+        }
+
+        SettingsSection("Подключение", accent2) {
+            SettingRow(
+                "Управлять подключением здесь нельзя",
+                "Android не даёт стороннему приложению без системных прав самому подключать " +
+                    "или переподключать уже сопряжённое Bluetooth-устройство — это ограничение " +
+                    "платформы. Нажмите, чтобы открыть системные настройки Bluetooth",
+                accent2
+            ) {
+                SmallButton("Открыть", accent2) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }
+            }
+        }
+
+        Hint(
+            "Hands-free (HFP) — профиль для звонков, Медиа (A2DP) — для музыки. Собственный " +
+                "экран звонка оболочки работает независимо от выбора здесь — этот выбор влияет " +
+                "только на подписи и на то, какие уведомления считаются «с телефона».",
+            accent
+        )
+    }
+}
+
+@Composable
+private fun BtDeviceRow(
+    device: PairedBtDevice,
+    selected: Boolean,
+    accent: Color,
+    accent2: Color,
+    onSelect: () -> Unit
+) {
+    SettingRow(
+        device.name,
+        buildString {
+            append(device.address)
+            when {
+                device.connectedHeadset && device.connectedMedia -> append(" · Hands-free и медиа")
+                device.connectedHeadset -> append(" · Hands-free")
+                device.connectedMedia -> append(" · медиа")
+                else -> append(" · не подключено")
+            }
+        },
+        if (device.connected) accent2 else Neon.TextLow
+    ) {
+        NeonToggle(selected, accent) { onSelect() }
+    }
+}
+
 /* ═════════════════════  5. ВНЕШНИЙ ВИД  ═════════════════════ */
 
 @Composable
@@ -1205,7 +1405,7 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
             }
         }
 
-        Hint("NeonDrive · версия 1.3.0", accent)
+        Hint("NeonDrive · версия 1.3.1", accent)
     }
 }
 

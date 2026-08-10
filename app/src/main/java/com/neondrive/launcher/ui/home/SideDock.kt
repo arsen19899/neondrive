@@ -7,11 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -55,17 +56,24 @@ fun SideDock(
     horizontal: Boolean = false
 ) {
     if (horizontal) {
+        // Высота — не фиксированная: ClockCard рисует три строки текста (время,
+        // дата, день недели), и на некоторых плотностях/масштабах шрифта системы
+        // им не хватало жёстких 92dp — нижняя строка (день недели) обрезалась
+        // панелью. minHeight гарантирует прежний компактный вид на типичных
+        // экранах, а wrapContentHeight у Row ниже даёт контенту вырасти, если
+        // ему тесно, вместо того чтобы обрезаться.
         Box(
             modifier
                 .fillMaxWidth()
-                .height(92.dp)
+                .heightIn(min = 92.dp)
                 .neonPanel(accent, radius = 22.dp)
         ) {
             Row(
                 Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .wrapContentHeight()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {

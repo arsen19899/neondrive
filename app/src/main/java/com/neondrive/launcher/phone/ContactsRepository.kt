@@ -91,6 +91,33 @@ object ContactsRepository {
     }
 
     /**
+     * Имя контакта по номеру — для экрана звонка: входящий вызов отдаёт только
+     * номер, а платформенный caller ID (details.callerDisplayName) заполнен
+     * далеко не всегда. PhoneLookup сам нормализует форматирование номера
+     * (пробелы, +7 / 8, скобки), поэтому работает надёжнее, чем сравнение строк
+     * по уже загруженному списку контактов.
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun nameForNumber(context: Context, number: String): String? = withContext(Dispatchers.IO) {
+        if (!hasPermission(context) || number.isBlank()) return@withContext null
+        runCatching {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(number)
+            )
+            context.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    c.getString(c.getColumnIndexOrThrow(ContactsContract.PhoneLookup.DISPLAY_NAME))
+                } else null
+            }
+        }.getOrNull()
+    }
+
+    /**
      * Поиск и по имени, и по номеру: на ходу удобнее набрать три цифры,
      * чем целиться в буквы.
      */

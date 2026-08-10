@@ -12,18 +12,37 @@ android {
         // Головные устройства на Android 6+ (большинство китайских ГУ — 8.1/10/12)
         minSdk = 23
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.3.1"
+    }
+
+    signingConfigs {
+        // Постоянный ключ релиза — специально закоммичен в репозиторий вместе с
+        // паролями. Это НЕ секрет в обычном смысле: у ключа нет доступа ни к
+        // чему, кроме права переустановки этого конкретного пакета поверх самого
+        // себя. Раньше release-сборка подписывалась автосгенерированным
+        // debug.keystore — на GitHub Actions это отдельная, каждый раз новая
+        // виртуалка без сохранённого ~/.android/debug.keystore, поэтому КАЖДЫЙ
+        // прогон workflow подписывал APK новым случайным ключом. Android не
+        // ставит обновление поверх приложения с другой подписью («приложение не
+        // установлено» / конфликт пакета), поэтому пользователю приходилось
+        // вручную удалять NeonDrive перед установкой каждой новой сборки.
+        // Единый файл ключа, лежащий в репозитории, даёт всем сборкам —
+        // локальным и через Actions — одну и ту же подпись, и обновления
+        // ставятся поверх старой версии как обычно.
+        create("release") {
+            storeFile = file("../keystore/neondrive-release.jks")
+            storePassword = "neondrive_release_2026"
+            keyAlias = "neondrive"
+            keyPassword = "neondrive_release_2026"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Подпись отладочным ключом: APK ставится на головное устройство сразу,
-            // без заведения собственного keystore. Для публикации в маркете —
-            // замените на свой signingConfig.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             // Без суффикса: лаунчер должен ставиться одним пакетом,

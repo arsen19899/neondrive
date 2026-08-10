@@ -61,6 +61,7 @@ import coil.compose.AsyncImage
 import com.neondrive.launcher.phone.Contact
 import com.neondrive.launcher.phone.ContactsRepository
 import com.neondrive.launcher.ui.common.HudLabel
+import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.common.NeonCard
 import com.neondrive.launcher.ui.common.NeonScreenScaffold
 import com.neondrive.launcher.ui.theme.Neon
@@ -97,160 +98,108 @@ fun PhoneScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
         ContactsRepository.filter(contacts, effectiveQuery)
     }
 
+    val emptyBook: @Composable () -> Unit = {
+        Text(
+            "Телефонная книга пуста.\n" +
+                "Разрешите передачу контактов на телефоне при подключении по Bluetooth.",
+            color = Neon.TextLow,
+            fontSize = 13.sp,
+            lineHeight = 19.sp
+        )
+    }
+
     NeonScreenScaffold(
         title = "Телефон",
         subtitle = btName?.let { "Подключено: $it" } ?: "Bluetooth-телефон не подключён",
         accent = accent,
         onBack = onBack
     ) {
+        if (LocalCompactUi.current) {
+            // Портрет или карта во фрейме: номеронабиратель и книга не помещаются
+            // рядом, поэтому идут друг под другом внутри ОДНОГО LazyColumn.
+            // Именно один список, а не Column со вложенным списком: вложенный
+            // скролл внутри скролла в Compose роняет разметку («Vertical viewport
+            // was given unbounded height»), да и прокручивать две области по
+            // отдельности на ходу неудобно. Так номера, поиск и контакты — одна
+            // непрерывная лента, к которой можно домотать.
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                item {
+                    DialerCard(
+                        number = number,
+                        accent = accent,
+                        accent2 = accent2,
+                        btName = btName,
+                        modifier = Modifier.fillMaxWidth(),
+                        onKey = { number += it },
+                        onBackspace = { number = number.dropLast(1) },
+                        onCall = { dial(context, number) }
+                    )
+                }
+                item { Spacer(Modifier.height(6.dp)) }
+                item {
+                    SearchRow(
+                        query = query,
+                        accent = accent,
+                        accent2 = accent2,
+                        onQuery = { query = it },
+                        onHistory = {
+                            open(context, Intent(Intent.ACTION_VIEW).setType("vnd.android.cursor.dir/calls"))
+                        }
+                    )
+                }
+
+                when {
+                    !granted -> item {
+                        PermissionCard(accent2) {
+                            permissionLauncher.launch(android.Manifest.permission.READ_CONTACTS)
+                        }
+                    }
+
+                    contacts.isEmpty() -> item {
+                        Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { emptyBook() }
+                    }
+
+                    else -> items(shown, key = { it.id.toString() + it.digits }) { contact ->
+                        ContactRow(contact, accent, accent2) { dial(context, contact.number) }
+                    }
+                }
+            }
+            return@NeonScreenScaffold
+        }
+
+        // Широкий ландшафтный экран без фрейма — исходная раскладка, без изменений.
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
 
             /* ─── Номеронабиратель ─── */
-            NeonCard(
+            DialerCard(
+                number = number,
+                accent = accent,
+                accent2 = accent2,
+                btName = btName,
                 modifier = Modifier
                     .width(320.dp)
                     .fillMaxHeight(),
-                accent = accent
-            ) {
-                HudLabel("Набор номера", accent)
-                Spacer(Modifier.height(10.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF0C1424))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Text(
-                        number.ifEmpty { "—" },
-                        color = if (number.isEmpty()) Neon.TextLow else Neon.TextHi,
-                        fontSize = 24.sp,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 2.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-
-                listOf(
-                    listOf("1", "2", "3"),
-                    listOf("4", "5", "6"),
-                    listOf("7", "8", "9"),
-                    listOf("*", "0", "#")
-                ).forEach { row ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(bottom = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
-                    ) {
-                        row.forEach { key ->
-                            Box(
-                                Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color(0x330C1424))
-                                    .border(1.dp, accent.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
-                                    .clickable { number += key },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(key, color = Neon.TextHi, fontSize = 19.sp)
-                            }
-                        }
-                    }
-                }
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .neonGlow(Neon.Lime, 14.dp, 0.3f, 8.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Neon.Lime.copy(alpha = 0.18f))
-                            .border(1.dp, Neon.Lime.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
-                            .clickable { dial(context, number) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Call, "Вызов", tint = Neon.Lime)
-                    }
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0x330C1424))
-                            .border(1.dp, accent.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
-                            .clickable { number = number.dropLast(1) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Backspace, "Стереть", tint = Neon.TextMid)
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Bluetooth, null,
-                        tint = if (btName != null) accent2 else Neon.TextLow,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (btName != null) "Hands-free активен" else "Телефон не подключён",
-                        color = Neon.TextLow,
-                        fontSize = 12.sp
-                    )
-                }
-            }
+                onKey = { number += it },
+                onBackspace = { number = number.dropLast(1) },
+                onCall = { dial(context, number) }
+            )
 
             /* ─── Телефонная книга ─── */
             Column(Modifier.weight(1f).fillMaxHeight()) {
 
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0x660C1424))
-                            .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Rounded.Search, null,
-                                tint = accent.copy(alpha = 0.7f),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Box(Modifier.weight(1f)) {
-                                if (query.isEmpty()) {
-                                    Text(
-                                        "Поиск по имени или номеру",
-                                        color = Neon.TextLow,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                BasicTextField(
-                                    value = query,
-                                    onValueChange = { query = it },
-                                    singleLine = true,
-                                    textStyle = TextStyle(color = Neon.TextHi, fontSize = 14.sp),
-                                    cursorBrush = SolidColor(accent),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    IconAction(Icons.Rounded.History, accent2) {
+                SearchRow(
+                    query = query,
+                    accent = accent,
+                    accent2 = accent2,
+                    onQuery = { query = it },
+                    onHistory = {
                         open(context, Intent(Intent.ACTION_VIEW).setType("vnd.android.cursor.dir/calls"))
                     }
-                }
+                )
 
                 Spacer(Modifier.height(12.dp))
 
@@ -262,15 +211,7 @@ fun PhoneScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                     contacts.isEmpty() -> Box(
                         Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "Телефонная книга пуста.\n" +
-                                "Разрешите передачу контактов на телефоне при подключении по Bluetooth.",
-                            color = Neon.TextLow,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp
-                        )
-                    }
+                    ) { emptyBook() }
 
                     else -> LazyColumn(
                         Modifier.fillMaxSize(),
@@ -284,6 +225,165 @@ fun PhoneScreen(accent: Color, accent2: Color, onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** Номеронабиратель — одинаковый в обеих раскладках, отличается только модификатором. */
+@Composable
+private fun DialerCard(
+    number: String,
+    accent: Color,
+    accent2: Color,
+    btName: String?,
+    modifier: Modifier,
+    onKey: (String) -> Unit,
+    onBackspace: () -> Unit,
+    onCall: () -> Unit
+) {
+    NeonCard(modifier = modifier, accent = accent) {
+        HudLabel("Набор номера", accent)
+        Spacer(Modifier.height(10.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF0C1424))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                number.ifEmpty { "—" },
+                color = if (number.isEmpty()) Neon.TextLow else Neon.TextHi,
+                fontSize = 24.sp,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 2.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+
+        listOf(
+            listOf("1", "2", "3"),
+            listOf("4", "5", "6"),
+            listOf("7", "8", "9"),
+            listOf("*", "0", "#")
+        ).forEach { row ->
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                row.forEach { key ->
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x330C1424))
+                            .border(1.dp, accent.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                            .clickable { onKey(key) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(key, color = Neon.TextHi, fontSize = 19.sp)
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .neonGlow(Neon.Lime, 14.dp, 0.3f, 8.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Neon.Lime.copy(alpha = 0.18f))
+                    .border(1.dp, Neon.Lime.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                    .clickable(onClick = onCall),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Call, "Вызов", tint = Neon.Lime)
+            }
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x330C1424))
+                    .border(1.dp, accent.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                    .clickable(onClick = onBackspace),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Backspace, "Стереть", tint = Neon.TextMid)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Rounded.Bluetooth, null,
+                tint = if (btName != null) accent2 else Neon.TextLow,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (btName != null) "Hands-free активен" else "Телефон не подключён",
+                color = Neon.TextLow,
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+/** Строка поиска по книге плюс кнопка журнала вызовов. */
+@Composable
+private fun SearchRow(
+    query: String,
+    accent: Color,
+    accent2: Color,
+    onQuery: (String) -> Unit,
+    onHistory: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x660C1424))
+                .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.Search, null,
+                    tint = accent.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            "Поиск по имени или номеру",
+                            color = Neon.TextLow,
+                            fontSize = 14.sp
+                        )
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQuery,
+                        singleLine = true,
+                        textStyle = TextStyle(color = Neon.TextHi, fontSize = 14.sp),
+                        cursorBrush = SolidColor(accent),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        IconAction(Icons.Rounded.History, accent2, onHistory)
     }
 }
 
@@ -414,22 +514,37 @@ private fun IconAction(
 }
 
 /**
- * Звонок уходит напрямую (ACTION_CALL), минуя экран набора номера системного
- * «Телефона» — раньше ACTION_DIAL просто подставлял цифры и ждал, пока пользователь
- * ткнёт в чужом интерфейсе. Экран самого разговора всё равно рисует системный
- * Telecom (это епархия приложения по умолчанию), но переход в чужой UI для набора
- * больше не происходит. Без разрешения CALL_PHONE откатываемся на старое поведение,
- * чтобы не упасть с SecurityException.
+ * Звонок уходит через [android.telecom.TelecomManager.placeCall] напрямую в
+ * Telecom, минуя и системный номеронабиратель, и системный экран разговора:
+ * никакая чужая Activity не запускается вообще. Приём звонка на другом конце,
+ * сам разговор и его завершение оболочка показывает своим экраном —
+ * [com.neondrive.launcher.ui.phone.CallOverlay] — через собственный
+ * [com.neondrive.launcher.phone.NeonInCallService], зарегистрированный как
+ * UI автомобильного режима (см. комментарий в манифесте и в [com.neondrive.launcher.NeonApp]).
+ * Без разрешения CALL_PHONE откатываемся на ACTION_DIAL — системный
+ * номеронабиратель с уже подставленным номером, чтобы не упасть с
+ * SecurityException.
  */
+@SuppressLint("MissingPermission")
 private fun dial(context: Context, number: String) {
     if (number.isBlank()) return
     val canCallDirectly = androidx.core.content.ContextCompat.checkSelfPermission(
         context, android.Manifest.permission.CALL_PHONE
     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    val action = if (canCallDirectly) Intent.ACTION_CALL else Intent.ACTION_DIAL
+
+    if (canCallDirectly) {
+        val placed = runCatching {
+            val tm = context.getSystemService(Context.TELECOM_SERVICE)
+                as? android.telecom.TelecomManager ?: return@runCatching false
+            tm.placeCall(Uri.parse("tel:${Uri.encode(number)}"), null)
+            true
+        }.getOrDefault(false)
+        if (placed) return
+    }
+
     runCatching {
         context.startActivity(
-            Intent(action, Uri.parse("tel:${Uri.encode(number)}"))
+            Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }

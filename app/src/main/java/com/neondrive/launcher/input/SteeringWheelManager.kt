@@ -201,6 +201,17 @@ object SteeringWheelManager {
 
     @android.annotation.SuppressLint("MissingPermission")
     private fun answerCall(ctx: Context) {
+        // Если звонок сейчас у нашего NeonInCallService (обычный случай, пока
+        // включён автомобильный режим — см. NeonApp.enableCarMode), отвечаем
+        // через него: это тот же объект Call, что рисует CallOverlay, без
+        // отдельного разрешения ANSWER_PHONE_CALLS. TelecomManager.acceptRingingCall —
+        // запасной путь на случай, если звонок всё же поднял системный «Телефон».
+        if (com.neondrive.launcher.phone.NeonInCallService.current.value.state ==
+            com.neondrive.launcher.phone.NeonCallState.RINGING
+        ) {
+            com.neondrive.launcher.phone.NeonInCallService.answer()
+            return
+        }
         runCatching {
             val tm = ctx.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -213,6 +224,10 @@ object SteeringWheelManager {
 
     @android.annotation.SuppressLint("MissingPermission")
     private fun endCall(ctx: Context) {
+        if (!com.neondrive.launcher.phone.NeonInCallService.current.value.isEmpty) {
+            com.neondrive.launcher.phone.NeonInCallService.hangup()
+            return
+        }
         runCatching {
             val tm = ctx.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {

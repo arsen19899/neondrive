@@ -70,6 +70,8 @@ class SettingsRepository(private val context: Context) {
         val swcAdcTol = intPreferencesKey("swc_adc_tol")
         val swcAdcMap = stringPreferencesKey("swc_adc_map")
 
+        val phoneBluetoothAddress = stringPreferencesKey("phone_bt_address")
+
         val startOnBoot = booleanPreferencesKey("start_on_boot")
         val startOnScreenOn = booleanPreferencesKey("start_on_screen_on")
         val beDefaultLauncher = booleanPreferencesKey("be_default_launcher")
@@ -130,6 +132,8 @@ class SettingsRepository(private val context: Context) {
             swcAdcPath = p[K.swcAdcPath] ?: d.swcAdcPath,
             swcAdcTolerance = p[K.swcAdcTol] ?: d.swcAdcTolerance,
             swcAdcMap = p[K.swcAdcMap]?.let(::decodeActions) ?: d.swcAdcMap,
+
+            phoneBluetoothAddress = p[K.phoneBluetoothAddress] ?: d.phoneBluetoothAddress,
 
             startOnBoot = p[K.startOnBoot] ?: d.startOnBoot,
             startOnScreenOn = p[K.startOnScreenOn] ?: d.startOnScreenOn,
@@ -193,6 +197,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSwcAdcPath(v: String) = put { it[K.swcAdcPath] = v }
     suspend fun setSwcAdcTolerance(v: Int) = put { it[K.swcAdcTol] = v.coerceIn(1, 200) }
     suspend fun setSwcAdcMap(v: Map<Int, SwcAction>) = put { it[K.swcAdcMap] = encodeActions(v) }
+
+    suspend fun setPhoneBluetoothAddress(v: String) = put { it[K.phoneBluetoothAddress] = v }
 
     suspend fun setStartOnBoot(v: Boolean) = put { it[K.startOnBoot] = v }
     suspend fun setStartOnScreenOn(v: Boolean) = put { it[K.startOnScreenOn] = v }

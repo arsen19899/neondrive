@@ -179,6 +179,11 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             need += Manifest.permission.BLUETOOTH_CONNECT
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Нужно кнопке руля «Принять вызов» (SteeringWheelManager.answerCall) —
+            // без него acceptRingingCall() падает по SecurityException.
+            need += Manifest.permission.ANSWER_PHONE_CALLS
+        }
         runCatching { permissionLauncher.launch(need.toTypedArray()) }
     }
 }
