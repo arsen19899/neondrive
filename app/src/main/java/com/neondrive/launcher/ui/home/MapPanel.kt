@@ -1,5 +1,6 @@
 package com.neondrive.launcher.ui.home
 
+import android.graphics.Rect
 import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -41,6 +42,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -54,19 +57,16 @@ import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonGlow
 import com.neondrive.launcher.ui.theme.neonPanel
+import kotlin.math.roundToInt
 
 /**
  * Панель навигации — две трети рабочего стола.
  *
- * Панель рисует собственный HUD по данным GPS, пока настоящее навигационное
- * приложение не поднято, чтобы рабочий стол не выглядел пустым. Когда навигатор
- * поднят «во фрейме», эта панель не рисуется вовсе — её место занимает реальное
- * плавающее окно.
- *
- * Границы ячейки под карту сообщает в [MapFrameController] сам рабочий стол
- * ([HomeScreen]), а не эта панель: по ним навигатор поднимается плавающим окном и
- * по ним же считается свободная полоса для вторичных экранов, а нужны они и тогда,
- * когда панель не нарисована.
+ * Панель постоянно сообщает свои экранные границы в [MapFrameController]: по ним
+ * навигационное приложение поднимается плавающим окном ровно в этот прямоугольник
+ * (режим «Во фрейме») либо на весь экран с панелями оболочки поверх (режим
+ * «Поверх карты»). Пока приложение не поднято, панель рисует собственный HUD по
+ * данным GPS, чтобы рабочий стол не выглядел пустым.
  */
 @Composable
 fun MapPanel(
@@ -84,11 +84,17 @@ fun MapPanel(
 
     val launch: () -> Unit = { MapFrameController.launch(context, settings) }
 
-    // Границы ячейки карты сообщает не эта панель, а сам рабочий стол (HomeScreen):
-    // они нужны и тогда, когда панель не рисуется — пока настоящий навигатор стоит
-    // на её месте плавающим окном.
     Box(
         modifier
+            .onGloballyPositioned { coords ->
+                val r = coords.boundsInWindow()
+                MapFrameController.updateBounds(
+                    Rect(
+                        r.left.roundToInt(), r.top.roundToInt(),
+                        r.right.roundToInt(), r.bottom.roundToInt()
+                    )
+                )
+            }
             .neonGlow(accent, 26.dp, 0.14f, 16.dp)
             .neonPanel(accent, radius = 26.dp)
             .clip(RoundedCornerShape(26.dp))

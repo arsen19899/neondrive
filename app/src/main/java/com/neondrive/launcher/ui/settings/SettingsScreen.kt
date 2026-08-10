@@ -1174,6 +1174,7 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     val apps = remember { NavigatorBridge.installedNavApps(context) }
     val freeform = remember { NavigatorBridge.freeformSupported(context) }
     val canOverlay = NeonOverlayService.canDraw(context)
+    val frameActive by MapFrameController.active.collectAsState()
 
     Column {
         SettingsSection("Приложение навигации", accent) {
@@ -1201,6 +1202,31 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                     }
                 }
             }
+        }
+
+        SettingsSection("Расположение карты", accent) {
+            SettingRow(
+                "Сторона карты",
+                if (s.mapSide == SidebarSide.LEFT)
+                    "Карта слева, приборы и плеер справа от неё"
+                else "Приборы и плеер слева, карта справа — заводское расположение",
+                accent
+            ) {
+                NeonSegmented(
+                    options = SidebarSide.entries.toList(),
+                    selected = s.mapSide,
+                    label = { if (it == SidebarSide.LEFT) "Слева" else "Справа" },
+                    accent = accent
+                ) { v -> edit { it.setMapSide(v) } }
+            }
+            Hint(
+                "Сторона карты настраивается отдельно от стороны бокового меню — под " +
+                    "конкретное ГУ и посадку водителя. Когда навигатор поднят «во фрейме», " +
+                    "с противоположной стороны остаётся свободная полоса: в неё оболочка " +
+                    "вписывает настройки и остальные экраны, чтобы они не оказались под " +
+                    "плавающим окном навигатора.",
+                accent2
+            )
         }
 
         SettingsSection("Карта во фрейме", accent2) {
@@ -1273,9 +1299,18 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                     ) { v -> edit { it.setMapAutoStartDelay(v.roundToInt()) } }
                 }
             }
-            SettingRow("Проверить сейчас", "Поднять карту в выбранном режиме", accent) {
-                SmallButton("Запустить", accent) {
-                    MapFrameController.launch(context, s)
+            SettingRow(
+                if (frameActive) "Фрейм развёрнут" else "Проверить сейчас",
+                if (frameActive)
+                    "Оболочка считает карту поднятой и ужимает экраны в свободную полосу. " +
+                        "Свернуть можно здесь или плиткой «Навигация» в доке"
+                else "Поднять карту в выбранном режиме",
+                if (frameActive) accent2 else accent
+            ) {
+                if (frameActive) {
+                    SmallButton("Свернуть", Neon.Amber) { MapFrameController.stop(context) }
+                } else {
+                    SmallButton("Запустить", accent) { MapFrameController.launch(context, s) }
                 }
             }
         }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Единая точка управления «картой во фрейме».
  *
- * Рабочий стол сообщает сюда экранные границы ячейки под карту, а дальше контроллер сам решает,
+ * Панель карты сообщает сюда свои экранные границы, а дальше контроллер сам решает,
  * как поднять навигацию: плавающим окном по этим границам или на весь экран с
  * панелями оболочки поверх.
  */
@@ -44,7 +44,6 @@ object MapFrameController {
                 val bounds = _frameBounds.value
                 val ok = NavigatorBridge.openInFrame(context, pkg, bounds)
                 _active.value = ok
-                if (ok) lastLaunchBounds = Rect(bounds)
                 if (ok && !NavigatorBridge.freeformSupported(context)) {
                     Toast.makeText(
                         context,
@@ -74,14 +73,13 @@ object MapFrameController {
         }
     }
 
-    /** Выключить режим: убрать панели поверх карты. */
+    /** Выключить режим: убрать панели поверх карты / считать фрейм свёрнутым. */
     fun stop(context: Context) {
         NeonOverlayService.hide(context)
         _active.value = false
     }
 
     /**
-<<<<<<< HEAD
      * Кнопка «Навигация» в доке работает как тумблер: карта поднята — сворачиваем,
      * свёрнута — поднимаем.
      *
@@ -116,41 +114,6 @@ object MapFrameController {
     }
 
     /**
-     * Переставить уже поднятое окно навигатора под текущие границы панели.
-     *
-     * Плавающее окно — окно системы, а не наш элемент разметки: когда рабочий стол
-     * перестраивается (сменили сторону карты, сторону дока, убрали строку приборов,
-     * повернули экран), оно само никуда не переезжает и остаётся висеть на прежнем
-     * месте. Единственный доступный способ подвинуть его — запустить навигатор
-     * заново с новыми launch bounds.
-     *
-     * Вызывается только когда фрейм действительно поднят и границы заметно
-     * изменились: перезапуск — операция видимая, дёргать её на каждый пиксель
-     * пересчёта разметки нельзя.
-     */
-    fun relaunchIfActive(context: Context, settings: LauncherSettings) {
-        if (!_active.value || settings.mapMode != MapMode.FRAME) return
-        val bounds = _frameBounds.value
-        if (bounds.isEmpty) return
-        if (!lastLaunchBounds.isEmpty && movedLittle(lastLaunchBounds, bounds)) return
-        lastLaunchBounds = Rect(bounds)
-        NavigatorBridge.openInFrame(context, settings.mapPackage, bounds)
-    }
-
-    /** Порог «то же самое место» — меньше него перезапуск не оправдан. */
-    private fun movedLittle(a: Rect, b: Rect): Boolean {
-        val tolerance = 48
-        return kotlin.math.abs(a.left - b.left) < tolerance &&
-            kotlin.math.abs(a.top - b.top) < tolerance &&
-            kotlin.math.abs(a.right - b.right) < tolerance &&
-            kotlin.math.abs(a.bottom - b.bottom) < tolerance
-    }
-
-    private var lastLaunchBounds = Rect()
-
-    /**
-=======
->>>>>>> parent of 5eab26a (Add files via upload)
      * Автозапуск при старте оболочки. Ждём, пока панель сообщит свои границы,
      * иначе плавающее окно откроется не туда.
      */
