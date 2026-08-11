@@ -52,11 +52,21 @@ object SteeringWheelManager {
     private var downAt = HashMap<Int, Long>()
     private var longFired = HashSet<Int>()
 
+    /**
+     * Опрос ADC-ноды уже пробовали и она не читается на этом ГУ. Флаг гасит
+     * повторные попытки: без него любое изменение любой настройки заново
+     * запускало трёхсекундный цикл неудачных чтений в фоне. Сбрасывается, когда
+     * пользователь сам меняет путь или переключает тумблер ADC-режима — то есть
+     * когда есть смысл попробовать снова.
+     */
+    private var adcUnavailable = false
+
     fun configure(context: Context, s: LauncherSettings) {
         appContext = context.applicationContext
         val adcChanged = s.swcAdcEnabled != settings.swcAdcEnabled || s.swcAdcPath != settings.swcAdcPath
         settings = s
-        if (adcChanged || (s.swcAdcEnabled && adcJob == null)) {
+        if (adcChanged) adcUnavailable = false
+        if (adcChanged || (s.swcAdcEnabled && adcJob == null && !adcUnavailable)) {
             stopAdc()
             if (s.swcAdcEnabled) startAdc()
         }
@@ -122,14 +132,65 @@ object SteeringWheelManager {
 
     /* ─────────────────  ADC-РЕЖИМ  ───────────────── */
 
+    /**
+     * Ноды sysfs, в которые ядра разных ГУ выкладывают «сырое» значение АЦП
+     * резистивного руля. Единого стандарта нет: путь зависит от платформы
+     * (Unisoc, Allwinner, Rockchip, MTK) и от того, как вендор назвал драйвер.
+     * Пробуем по очереди и берём первую читаемую — раньше был жёстко зашит один
+     * путь `/sys/class/adc_key/value`, и на всех остальных прошивках ADC-режим
+     * молча не работал, без единого признака в интерфейсе.
+     *
+     * Отдельно: на Android 10+ SELinux запрещает обычному приложению читать
+     * большинство нод в /sys, поэтому даже существующий файл может оказаться
+     * недоступен. Это ограничение системы, а не оболочки; в таком случае
+     * остаётся KeyEvent-режим, который на подавляющем большинстве ГУ и работает.
+     */
+    val KNOWN_ADC_NODES: List<String> = listOf(
+        "/sys/class/adc_key/value",
+        "/sys/class/switch/adc_key/value",
+        "/sys/devices/platform/adc_key/value",
+        "/sys/devices/virtual/misc/adc_key/value",
+        "/sys/class/misc/adckey/value",
+        "/sys/class/sprd_adc/value",
+        "/sys/kernel/swkey/value",
+        "/sys/class/hwmon/hwmon0/device/adc_val",
+        "/sys/devices/platform/soc/soc:swkey/value"
+    )
+
+    /** Первая читаемая ADC-нода из известных, либо null. Для кнопки «найти» в настройках. */
+    fun detectAdcNode(): String? = KNOWN_ADC_NODES.firstOrNull { path ->
+        runCatching { File(path).let { it.exists() && it.canRead() } }.getOrDefault(false)
+    }
+
     fun startAdc() {
-        val path = settings.swcAdcPath
+        // Настроенный путь важнее автоопределения, но если он не читается —
+        // не сидим молча, а пробуем известные альтернативы.
+        val configured = settings.swcAdcPath
+        val path = if (runCatching { File(configured).canRead() }.getOrDefault(false)) {
+            configured
+        } else {
+            detectAdcNode() ?: configured
+        }
         adcJob = scope.launch {
             var lastValue = -1
             var idleSince = 0L
+            // Если ноды нет или SELinux не даёт её прочитать (обычное дело на
+            // Android 10+ для стороннего приложения), опрос бессмысленен. Раньше
+            // цикл всё равно крутился вечно — 16 неудачных open() в секунду на
+            // фоне, круглые сутки, на и без того слабом процессоре ГУ. Теперь
+            // после серии подряд неудачных чтений опрос просто останавливается;
+            // включить заново можно тумблером в настройках.
+            var misses = 0
             while (true) {
                 val raw = readAdc(path)
-                if (raw != null) {
+                if (raw == null) {
+                    if (++misses >= MAX_ADC_MISSES) {
+                        adcUnavailable = true
+                        adcJob = null
+                        return@launch
+                    }
+                } else {
+                    misses = 0
                     // «Отпущено» на большинстве ГУ — это очень большое или нулевое значение
                     val isIdle = raw <= 0 || raw >= 4000
                     if (!isIdle && abs(raw - lastValue) > settings.swcAdcTolerance) {
@@ -144,6 +205,9 @@ object SteeringWheelManager {
             }
         }
     }
+
+    /** Сколько подряд неудачных чтений считать признаком «ноды нет». ~3 секунды. */
+    private const val MAX_ADC_MISSES = 50
 
     fun stopAdc() {
         adcJob?.cancel()

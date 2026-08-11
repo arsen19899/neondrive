@@ -72,12 +72,17 @@ object AudioFxController {
         release()
         sessionId = audioSessionId
         val savedEnabled = prefs?.getBoolean(KEY_ENABLED, false) ?: false
-        runCatching {
-            eq = Equalizer(0, audioSessionId).apply { enabled = savedEnabled }
-            bass = BassBoost(0, audioSessionId).apply { enabled = true }
-            virt = Virtualizer(0, audioSessionId).apply { enabled = true }
-            loud = LoudnessEnhancer(audioSessionId).apply { enabled = true }
-        }
+        // Каждый эффект создаётся в своём runCatching. На магнитолах со внешним
+        // DSP (Unisoc/MTK с YD7388, TDA7388 и прочими) часть эффектов в прошивке
+        // просто не реализована, и конструктор бросает исключение. Раньше все
+        // четыре создавались в одном блоке: падение BassBoost обрывало блок, и
+        // эквалайзер оставался без Virtualizer и LoudnessEnhancer, хотя сам
+        // прекрасно работал. Теперь отсутствие одного эффекта не тянет за собой
+        // остальные — доступно ровно то, что реально поддерживает железо.
+        runCatching { eq = Equalizer(0, audioSessionId).apply { enabled = savedEnabled } }
+        runCatching { bass = BassBoost(0, audioSessionId).apply { enabled = true } }
+        runCatching { virt = Virtualizer(0, audioSessionId).apply { enabled = true } }
+        runCatching { loud = LoudnessEnhancer(audioSessionId).apply { enabled = true } }
         applySavedValues()
         refresh()
     }

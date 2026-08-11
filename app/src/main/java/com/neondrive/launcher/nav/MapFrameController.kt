@@ -124,6 +124,16 @@ object MapFrameController {
     ) {
         if (autoStarted) return
         if (!settings.mapAutoStart) return
+
+        // Автозапуск не должен угонять экран под системные настройки. В режиме
+        // OVERLAY ручной [launch] при отсутствии разрешения «Поверх других
+        // приложений» показывает тост и открывает системный экран выдачи — это
+        // правильно, когда пользователь сам нажал плитку «Навигация», но на
+        // старте ГУ это означало бы, что каждое включение зажигания встречает
+        // водителя чужим экраном настроек, пока разрешение не выдано. Поэтому
+        // молча пропускаем автозапуск: рабочий стол просто остаётся на месте.
+        if (settings.mapMode == MapMode.OVERLAY && !NeonOverlayService.canDraw(context)) return
+
         autoStarted = true
 
         kotlinx.coroutines.delay(settings.mapAutoStartDelaySec * 1000L)

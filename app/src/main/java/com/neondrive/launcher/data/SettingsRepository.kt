@@ -24,6 +24,17 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("n
  */
 class SettingsRepository(private val context: Context) {
 
+    /**
+     * Заводское состояние декоративной графики зависит от железа ГУ: на слабом
+     * устройстве анимированный фон выключен, а «упрощённая графика» включена
+     * сразу — иначе первое впечатление от оболочки на бюджетной магнитоле это
+     * рывки при скролле. Значение, которое пользователь выставил сам, лежит в
+     * DataStore и всегда перекрывает автоопределение — ниже оно читается первым.
+     */
+    private val lowEndDevice: Boolean by lazy {
+        com.neondrive.launcher.system.DeviceProfile.isLowEnd(context)
+    }
+
     private object K {
         val accent = stringPreferencesKey("accent")
         val sidebarSide = stringPreferencesKey("sidebar_side")
@@ -85,12 +96,12 @@ class SettingsRepository(private val context: Context) {
             accent = p[K.accent] ?: d.accent,
             sidebarSide = p[K.sidebarSide]?.let { runCatching { SidebarSide.valueOf(it) }.getOrNull() }
                 ?: d.sidebarSide,
-            animatedBackground = p[K.animatedBg] ?: d.animatedBackground,
+            animatedBackground = p[K.animatedBg] ?: (d.animatedBackground && !lowEndDevice),
             show24h = p[K.show24h] ?: d.show24h,
             units = p[K.units]?.let { runCatching { SpeedUnits.valueOf(it) }.getOrNull() } ?: d.units,
             mapPackage = p[K.mapPackage] ?: d.mapPackage,
             showSpeedometer = p[K.showSpeedometer] ?: d.showSpeedometer,
-            reducedEffects = p[K.reducedEffects] ?: d.reducedEffects,
+            reducedEffects = p[K.reducedEffects] ?: (d.reducedEffects || lowEndDevice),
             backgroundImagePath = p[K.backgroundImagePath] ?: d.backgroundImagePath,
             backgroundDarken = p[K.backgroundDarken] ?: d.backgroundDarken,
             extraMusicFolders = p[K.extraMusicFolders]?.let(::decodeStringList) ?: d.extraMusicFolders,

@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.neondrive.launcher.automation.AutomationService
 import com.neondrive.launcher.automation.FuelStationHub
@@ -179,7 +181,25 @@ class MainActivity : ComponentActivity() {
         // намеренно пусто
     }
 
+    /**
+     * Прячем системные панели двумя способами сразу.
+     *
+     * `systemUiVisibility` объявлен устаревшим с Android 11 и на части прошивок
+     * (в том числе на ГУ с сильно перепиленным SystemUI) уже игнорируется —
+     * оболочка оставалась с видимой полосой навигации, съедающей нижнюю часть
+     * рабочего стола. `WindowInsetsControllerCompat` — актуальный путь, но на
+     * старых прошивках он опирается на тот же legacy-механизм, поэтому оба
+     * вызова оставлены рядом: что-нибудь из двух сработает на любом устройстве.
+     */
     private fun hideSystemBars() {
+        runCatching {
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY

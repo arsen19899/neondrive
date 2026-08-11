@@ -60,6 +60,7 @@ import com.neondrive.launcher.data.SpeedUnits
 import com.neondrive.launcher.data.SpeedVolumeStep
 import com.neondrive.launcher.data.RadioMode
 import com.neondrive.launcher.data.SwcAction
+import com.neondrive.launcher.input.SteeringWheelManager
 import com.neondrive.launcher.media.FmRadioController
 import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
@@ -786,6 +787,8 @@ private fun StepEditor(
 @Composable
 private fun WheelTab(s: LauncherSettings, accent: Color, accent2: Color, edit: SettingsEdit) {
     var learnTarget by remember { mutableStateOf<SwcAction?>(null) }
+    /** Результат последнего поиска ADC-ноды — показывается подписью в той же строке. */
+    var adcProbe by remember { mutableStateOf<String?>(null) }
 
     Column {
         SettingsSection("Кнопки на руле", accent) {
@@ -830,6 +833,27 @@ private fun WheelTab(s: LauncherSettings, accent: Color, accent2: Color, edit: S
                         label = { it.substringAfterLast('/') },
                         accent = accent2
                     ) { v -> edit { it.setSwcAdcPath(v) } }
+                }
+                // Единого стандарта на имя ADC-ноды нет: у каждой платформы и почти
+                // у каждого вендора он свой, а список в сегментах физически не может
+                // вместить их все. Кнопка проходит по всем известным путям и ставит
+                // первый, который реально читается на этом ГУ, — вместо того чтобы
+                // заставлять пользователя перебирать варианты вслепую.
+                SettingRow(
+                    "Найти ноду автоматически",
+                    adcProbe ?: "Проверить все известные пути на этом устройстве",
+                    accent2
+                ) {
+                    SmallButton("Найти", accent2) {
+                        val found = SteeringWheelManager.detectAdcNode()
+                        if (found != null) {
+                            adcProbe = "Найдено: $found"
+                            edit { it.setSwcAdcPath(found) }
+                        } else {
+                            adcProbe = "Читаемых ADC-нод не найдено — " +
+                                "прошивка их не отдаёт. Пользуйтесь режимом клавиш выше."
+                        }
+                    }
                 }
                 SettingRow(
                     "Допуск разброса",
