@@ -325,48 +325,67 @@ object GuidanceEngine {
         if (tts != null) return
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         runCatching {
-            tts = TextToSpeech(context) { status ->
-                ttsReady = status == TextToSpeech.SUCCESS
-                if (!ttsReady) return@TextToSpeech
+            tts = TextToSpeech(context, TextToSpeech.OnInitListener { status ->
+                onTtsInit(status)
+            })
+        }
+    }
 
-                // Русский голос есть не на каждой прошивке ГУ. Если его нет — не
-                // подсовываем английский движок русскому тексту, это звучит как
-                // набор букв; просто оставляем ведение молчаливым.
-                val res = runCatching { tts?.setLanguage(Locale("ru", "RU")) }.getOrNull()
-                if (res == TextToSpeech.LANG_MISSING_DATA ||
-                    res == TextToSpeech.LANG_NOT_SUPPORTED
-                ) {
-                    ttsReady = false
-                    return@TextToSpeech
+    /**
+     * Готов ли движок синтеза и годится ли он для русской озвучки.
+     *
+     * Вынесено из лямбды-колбэка отдельным методом: там нужны ранние выходы, а
+     * `return@` из SAM-лямбды, переданной в конструктор, читается плохо и зависит
+     * от того, как компилятор назовёт метку.
+     */
+    private fun onTtsInit(status: Int) {
+        ttsReady = status == TextToSpeech.SUCCESS
+        if (!ttsReady) return
+
+        // Русский голос есть не на каждой прошивке ГУ. Если его нет — не
+        // подсовываем английский движок русскому тексту, это звучит как набор
+        // букв; просто оставляем ведение молчаливым.
+        val res = runCatching { tts?.setLanguage(Locale("ru", "RU")) }.getOrNull()
+        if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+            ttsReady = false
+            return
+        }
+
+        // USAGE_ASSISTANCE_NAVIGATION_GUIDANCE — не косметика: по этому признаку
+        // система понимает, что звук является навигационной подсказкой, и
+        // обрабатывает его иначе, чем музыку. На части прошивок и в
+        // Bluetooth-гарнитурах это включает правильную маршрутизацию звука,
+        // а музыке даёт корректно пригаснуть.
+        runCatching {
+            tts?.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+        }
+
+        // Фокус нужно не только взять, но и вовремя отпустить, иначе музыка
+        // останется приглушённой навсегда после первой же фразы.
+        runCatching {
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    // Ничего: фокус уже взят перед вызовом speak.
                 }
 
-                // USAGE_ASSISTANCE_NAVIGATION_GUIDANCE — не косметика: по этому
-                // признаку система понимает, что звук является навигационной
-                // подсказкой, и обрабатывает его иначе, чем музыку. На части
-                // прошивок и в Bluetooth-гарнитурах это включает правильную
-                // маршрутизацию звука, а музыке даёт корректно пригаснуть.
-                runCatching {
-                    tts?.setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
+                override fun onDone(utteranceId: String?) {
+                    abandonFocus()
                 }
 
-                // Фокус нужно не только взять, но и вовремя отпустить, иначе
-                // музыка останется приглушённой навсегда после первой же фразы.
-                runCatching {
-                    tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) = Unit
-                        override fun onDone(utteranceId: String?) = abandonFocus()
-
-                        @Deprecated("Требуется абстрактным классом")
-                        override fun onError(utteranceId: String?) = abandonFocus()
-                        override fun onError(utteranceId: String?, errorCode: Int) = abandonFocus()
-                    })
+                @Deprecated("Абстрактный метод базового класса, помечен устаревшим в Android")
+                override fun onError(utteranceId: String?) {
+                    abandonFocus()
                 }
-            }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    abandonFocus()
+                }
+            })
         }
     }
 

@@ -108,12 +108,17 @@ object PlaceSearch {
             val plat = coords.optDouble(1)
             val p = f.optJSONObject("properties") ?: continue
 
-            val name = p.optString("name").ifBlank {
-                listOfNotNull(
-                    p.optString("street").ifBlank { null },
-                    p.optString("housenumber").ifBlank { null }
-                ).joinToString(", ")
-            }.ifBlank { continue }
+            // У точки может не быть собственного имени — тогда показываем адрес.
+            // Раньше `continue` стоял прямо внутри `ifBlank { }`: выход из цикла
+            // изнутри inline-лямбды Kotlin считает экспериментальной возможностью
+            // и на этой версии компилятора отказывается собирать. Разворачиваем в
+            // обычную проверку — заодно читается яснее.
+            val streetAddress = listOfNotNull(
+                p.optString("street").ifBlank { null },
+                p.optString("housenumber").ifBlank { null }
+            ).joinToString(", ")
+            val name = p.optString("name").ifBlank { streetAddress }
+            if (name.isBlank()) continue
 
             out += Place(
                 name = name,

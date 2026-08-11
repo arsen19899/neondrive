@@ -151,24 +151,31 @@ object HazardHub {
             }
         }
 
-        val showCamera = cameraWarnEnabled && nearestDist != null && nearestDist <= WARN_DISTANCE_M
+        // Дальше работаем с неизменяемыми копиями: умные приведения типов на
+        // локальных `var` компилятор делает не везде одинаково, а читается такой
+        // код всё равно хуже.
+        val dist = nearestDist
+        val key = nearestKey
+        val camLimit = nearestLimit
+
+        val showCamera = cameraWarnEnabled && dist != null && dist <= WARN_DISTANCE_M
         val limit = if (speedLimitEnabled) limitKmh else null
         val speeding = limit != null && speedKmh > limit + toleranceKmh
 
         _state.value = _state.value.copy(
-            cameraAheadM = if (showCamera) nearestDist else null,
-            cameraLimitKmh = if (showCamera) nearestLimit else null,
+            cameraAheadM = if (showCamera) dist else null,
+            cameraLimitKmh = if (showCamera) camLimit else null,
             speedLimitKmh = limit,
             speeding = speeding
         )
 
         // Голос — один раз на камеру. Без этого фраза повторялась бы на каждом
         // фиксе GPS все триста метров подряд.
-        if (showCamera && nearestKey != null && nearestDist!! > PASSED_M &&
-            warnedCameras.add(nearestKey)
+        if (showCamera && dist != null && key != null && dist > PASSED_M &&
+            warnedCameras.add(key)
         ) {
-            val rounded = GeoMath.roundForSpeech(nearestDist)
-            val limitPart = nearestLimit?.let { ", ограничение $it" }.orEmpty()
+            val rounded = GeoMath.roundForSpeech(dist)
+            val limitPart = if (camLimit != null) ", ограничение $camLimit" else ""
             GuidanceEngine.speakExternal("Камера через $rounded метров$limitPart")
         }
 
