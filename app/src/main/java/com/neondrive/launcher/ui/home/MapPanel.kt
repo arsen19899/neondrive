@@ -21,17 +21,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +88,14 @@ fun MapPanel(
 
     val launch: () -> Unit = { MapFrameController.launch(context, settings) }
 
+    val embedded = settings.mapMode == MapMode.EMBEDDED
+    // Своя карта интерактивна: тащить, щипать, зумить. Значит, панель не может
+    // быть одной большой кнопкой «открыть навигатор» — иначе любой жест по карте
+    // выкидывал бы в навигатор. В этом режиме открытие висит только на явной
+    // кнопке внизу справа.
+    var follow by remember { mutableStateOf(true) }
+    var zoom by remember { mutableStateOf(16.0) }
+
     Box(
         modifier
             .onGloballyPositioned { coords ->
@@ -98,9 +110,20 @@ fun MapPanel(
             .neonGlow(accent, 26.dp, 0.14f, 16.dp)
             .neonPanel(accent, radius = 26.dp)
             .clip(RoundedCornerShape(26.dp))
-            .clickable(onClick = launch)
+            .then(if (embedded) Modifier else Modifier.clickable(onClick = launch))
     ) {
-        MapCanvas(accent = accent, accent2 = accent2, moving = gps.speedKmh > 1f)
+        if (embedded) {
+            EmbeddedMap(
+                gps = gps,
+                accent = accent,
+                modifier = Modifier.fillMaxSize(),
+                follow = follow,
+                onUserPanned = { follow = false },
+                zoomRequest = zoom
+            )
+        } else {
+            MapCanvas(accent = accent, accent2 = accent2, moving = gps.speedKmh > 1f)
+        }
 
         Row(
             Modifier
@@ -140,25 +163,29 @@ fun MapPanel(
             )
         }
 
-        // Подсказка про активный режим — по центру, поверх HUD
-        Box(
-            Modifier
-                .align(Alignment.Center)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xB3060B14))
-                .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                .clickable(onClick = launch)
-                .padding(horizontal = 22.dp, vertical = 14.dp)
-        ) {
-            Text(
-                if (settings.mapMode == MapMode.FRAME)
-                    "Нажмите, чтобы открыть $navLabel во фрейме"
-                else
-                    "Нажмите, чтобы открыть $navLabel с панелями поверх",
-                fontSize = 12.sp,
-                color = accent2,
-                fontWeight = FontWeight.Medium
-            )
+        // Подсказка про активный режим — по центру, поверх нарисованного HUD.
+        // На своей карте её нет: там центр занят машиной, а плашка поверх живой
+        // карты только мешала бы и перехватывала касания.
+        if (!embedded) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xB3060B14))
+                    .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .clickable(onClick = launch)
+                    .padding(horizontal = 22.dp, vertical = 14.dp)
+            ) {
+                Text(
+                    if (settings.mapMode == MapMode.FRAME)
+                        "Нажмите, чтобы открыть $navLabel во фрейме"
+                    else
+                        "Нажмите, чтобы открыть $navLabel с панелями поверх",
+                    fontSize = 12.sp,
+                    color = accent2,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
 
         Row(
@@ -200,6 +227,22 @@ fun MapPanel(
                 }
             }
 
+            // Управление своей картой. Зум нужен потому, что штатные кнопки
+            // osmdroid отключены (чужеродно смотрятся), а щипок двумя пальцами на
+            // ходу за рулём — так себе идея. «К себе» возвращает следование за
+            // машиной после того, как карту подвинули рукой.
+            if (embedded) {
+                QuickChip("Отдалить", Icons.Rounded.Remove, accent) {
+                    zoom = (zoom - 1.0).coerceAtLeast(3.0)
+                }
+                QuickChip("Приблизить", Icons.Rounded.Add, accent) {
+                    zoom = (zoom + 1.0).coerceAtMost(19.0)
+                }
+                if (!follow) {
+                    QuickChip("К себе", Icons.Rounded.MyLocation, accent2) { follow = true }
+                }
+            }
+
             Spacer(Modifier.weight(1f))
 
             Box(
@@ -219,6 +262,7 @@ fun MapPanel(
                     Spacer(Modifier.size(7.dp))
                     Text(
                         when (settings.mapMode) {
+                            MapMode.EMBEDDED -> "НАВИГАТОР"
                             MapMode.FRAME -> "ВО ФРЕЙМЕ"
                             MapMode.OVERLAY -> "ПОВЕРХ КАРТЫ"
                         },

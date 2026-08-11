@@ -127,6 +127,13 @@ dependencies {
     // Загрузка обложек / иконок
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // Собственная карта на рабочем столе (режим «Своя карта»).
+    // osmdroid рисует тайлы OpenStreetMap обычным Canvas — без ключа, без GMS и
+    // без нагрузки на GPU, что важно для ГУ уровня Cortex-A53 + PowerVR. Это
+    // единственный способ показать настоящую карту НА ЧАСТИ экрана, не завися от
+    // freeform-режима прошивки: карта рисуется внутри нашего же окна.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.android.material:material:1.12.0")
 }

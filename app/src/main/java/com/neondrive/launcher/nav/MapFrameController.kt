@@ -39,6 +39,17 @@ object MapFrameController {
     fun launch(context: Context, settings: LauncherSettings): Boolean {
         val pkg = settings.mapPackage
         return when (settings.mapMode) {
+            // Карту рисует сама оболочка, поднимать поверх нечего: кнопка
+            // «Навигатор» означает буквально «открыть навигатор на весь экран»,
+            // когда нужна голосовая маршрутная навигация. Признак active при этом
+            // не поднимаем — панели оболочки никуда не деваются, рабочий стол
+            // остаётся прежним, к нему возвращаются кнопкой «Домой».
+            MapMode.EMBEDDED -> {
+                NeonOverlayService.hide(context)
+                _active.value = false
+                NavigatorBridge.openFullscreen(context, pkg)
+            }
+
             MapMode.FRAME -> {
                 NeonOverlayService.hide(context)
                 val bounds = _frameBounds.value
@@ -124,6 +135,11 @@ object MapFrameController {
     ) {
         if (autoStarted) return
         if (!settings.mapAutoStart) return
+
+        // В режиме своей карты автозапускать нечего: карта уже на рабочем столе
+        // и появляется вместе с ним. Открывать поверх неё ещё и навигатор на весь
+        // экран — ровно то, чего пользователь этим режимом и хотел избежать.
+        if (settings.mapMode == MapMode.EMBEDDED) return
 
         // Автозапуск не должен угонять экран под системные настройки. В режиме
         // OVERLAY ручной [launch] при отсутствии разрешения «Поверх других
