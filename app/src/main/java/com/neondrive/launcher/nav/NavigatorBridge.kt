@@ -3,11 +3,9 @@ package com.neondrive.launcher.nav
 import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.widget.Toast
 
 data class NavApp(val packageName: String, val label: String)
@@ -111,15 +109,13 @@ object NavigatorBridge {
      */
     fun freeformSupported(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
-        val byFeature = context.packageManager
-            .hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT)
-        val byGlobal = runCatching {
-            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
-        }.getOrDefault(false)
-        val resizable = runCatching {
-            Settings.Global.getInt(context.contentResolver, "force_resizable_activities", 0) == 1
-        }.getOrDefault(false)
-        return byFeature || byGlobal || resizable
+        // Признак «freeform реально поднят» и признак «флаги записаны, но ГУ ещё не
+        // перезагружено» — разные вещи, и раньше они здесь были свалены в одну
+        // проверку: достаточно было записанного force_resizable_activities, чтобы
+        // функция ответила «поддерживается», хотя плавающих окон в системе ещё нет.
+        // Теперь состоянием freeform заведует FreeformSetup, который эти случаи
+        // различает и умеет их не только читать, но и чинить.
+        return FreeformSetup.active(context)
     }
 
     /**
@@ -131,11 +127,15 @@ object NavigatorBridge {
     fun openInFrame(context: Context, preferred: String, bounds: Rect): Boolean {
         val pkg = resolvePackage(context, preferred) ?: return notInstalled(context)
         val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        intent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
-        )
+
+        // Раньше сюда добавлялся ещё и FLAG_ACTIVITY_LAUNCH_ADJACENT. Это была
+        // ошибка: флаг просит систему поставить активность во ВТОРУЮ половину
+        // разделённого экрана, что прямо противоречит точным границам окна из
+        // setLaunchBounds. Когда система флаг всё же учитывала, заданные границы
+        // отбрасывались и навигатор открывался не там, где нужно. Для домашнего
+        // экрана флаг вдобавок бесполезен: система не пускает лаунчер в
+        // split-screen в принципе, значит «соседней половины» не существует.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || bounds.isEmpty) {
             return openFullscreen(context, preferred)
@@ -143,10 +143,36 @@ object NavigatorBridge {
 
         val options = ActivityOptions.makeBasic()
         runCatching { options.setLaunchBounds(bounds) }
+        requestFreeformWindowingMode(options)
 
         val ok = runCatching { context.startActivity(intent, options.toBundle()) }.isSuccess
         return if (ok) true else openFullscreen(context, preferred)
     }
+
+    /**
+     * Попросить систему открыть окно именно в режиме плавающего окна.
+     *
+     * `ActivityOptions.setLaunchBounds` задаёт границы, но саму оконную политику
+     * не меняет: если задача уходит в полноэкранный режим, границы игнорируются.
+     * `setLaunchWindowingMode(WINDOWING_MODE_FREEFORM)` снимает эту неоднозначность,
+     * но метод в AOSP помечен `@hide` — в публичном SDK его нет, вызвать можно
+     * только рефлексией, и на части прошивок вызов заблокирован ограничениями
+     * на непубличные интерфейсы.
+     *
+     * Поэтому это именно попытка, а не требование: не вышло — работаем как раньше,
+     * на одних границах. Расширение возможностей без риска: любое исключение
+     * гасится, поведение не меняется.
+     */
+    private fun requestFreeformWindowingMode(options: ActivityOptions) {
+        runCatching {
+            val method = ActivityOptions::class.java
+                .getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+            method.invoke(options, WINDOWING_MODE_FREEFORM)
+        }
+    }
+
+    /** `WindowConfiguration.WINDOWING_MODE_FREEFORM` — константа скрытого API. */
+    private const val WINDOWING_MODE_FREEFORM = 5
 
     /* ─────────────────  URL-СХЕМЫ  ───────────────── */
 

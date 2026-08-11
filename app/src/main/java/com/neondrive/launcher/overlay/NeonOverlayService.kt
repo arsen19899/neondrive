@@ -103,10 +103,13 @@ class NeonOverlayService : LifecycleService() {
         lifecycleScope.launch {
             repo.settings.collect { settingsState.value = it }
         }
-        // Сторона панелей меняется на лету — окна нужно переставить
+        // Сторона панелей и доля экрана под навигацию меняются на лету, а размеры и
+        // положение плавающих окон задаются один раз при добавлении в WindowManager —
+        // значит, окна нужно пересоздать. Раньше отслеживалась только сторона, и
+        // ползунок доли экрана применялся лишь после перезапуска панелей.
         lifecycleScope.launch {
             repo.settings
-                .map { it.sidebarSide }
+                .map { it.sidebarSide to it.mapScreenPercent }
                 .distinctUntilChanged()
                 .collect { if (columnView != null) { removeViews(); addViews() } }
         }
@@ -142,20 +145,23 @@ class NeonOverlayService : LifecycleService() {
 
         val metrics = resources.displayMetrics
         val density = metrics.density
-        // Раньше колонка приборов и док были заметно уже, чем на рабочем столе —
-        // на планшетах пошире это ломало стили: дата в доке не влезала в одну
-        // строку, а плеер и виджеты приборов было тяжело читать. Плавающие окна
-        // задаются в пикселях, поэтому берём долю ширины экрана, но не меньше
-        // разумного минимума в dp — тогда даже на компактном 7" ГУ панели не
-        // сожмутся до нечитаемого состояния.
-        val columnWidth = maxOf(
-            (metrics.widthPixels * 0.32f).toInt(),
-            (360 * density).toInt()
-        ).coerceAtMost((metrics.widthPixels * 0.5f).toInt())
-        val dockWidth = maxOf(
-            (metrics.widthPixels * 0.15f).toInt(),
-            (172 * density).toInt()
-        )
+        val screenWidth = metrics.widthPixels
+
+        // Сколько экрана отдать навигации — та же настройка, что задаёт ширину
+        // панели карты на рабочем столе, чтобы «половина экрана» означала половину
+        // во всех режимах. Здесь она работает от обратного: панели оболочки
+        // занимают оставшуюся долю, и ровно столько же, сколько заказано, остаётся
+        // свободным под карту. Раньше ширины были зашиты (32 % + 15 %), и навигации
+        // всегда доставалось около 53 % — подстроить было нечем.
+        val navShare = settingsState.value.mapScreenPercent.coerceIn(30, 80) / 100f
+        val panelsTotal = (screenWidth * (1f - navShare)).toInt()
+
+        // Док узкий и по содержанию фиксированный, поэтому ему — минимально
+        // достаточная ширина, а всё остальное колонке приборов. Нижние границы в dp
+        // страхуют компактные 7" ГУ: даже при большой доле под навигацию панели не
+        // сожмутся до нечитаемого состояния, пусть и залезут на карту.
+        val dockWidth = (172 * density).toInt().coerceAtMost(maxOf(panelsTotal / 3, (96 * density).toInt()))
+        val columnWidth = (panelsTotal - dockWidth).coerceAtLeast((240 * density).toInt())
         val side = settingsState.value.sidebarSide
 
         val column = h.createView {

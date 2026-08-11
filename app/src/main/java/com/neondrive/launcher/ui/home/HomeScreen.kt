@@ -172,15 +172,27 @@ fun HomeScreen(
                 )
             }
         } else {
-            val columnWidth = maxWidth * 0.25f
+            // Ширину задаёт панель карты, а не колонка приборов — так «половина
+            // экрана под навигацию» означает ровно половину. Это принципиально:
+            // в режиме FRAME границы именно этой панели уходят в
+            // ActivityOptions.setLaunchBounds и становятся границами плавающего
+            // окна навигатора. Раньше доля была зашита константой (колонка
+            // приборов = 25 %, карте доставался весь остаток минус док, то есть
+            // около 66 %), и получить половину было невозможно.
+            // Верхняя граница страхует узкие 7" ГУ: даже при доле 80 % колонке
+            // приборов остаётся место, а не отрицательная ширина, при которой
+            // плеер и спидометр просто уезжали бы за край экрана.
+            val mapWidth = (maxWidth * (settings.mapScreenPercent.coerceIn(30, 80) / 100f))
+                .coerceAtMost(maxWidth - 260.dp)
+                .coerceAtLeast(maxWidth * 0.25f)
 
-            // Колонка приборов: спидометр сверху, плеер снизу.
-            // Когда навигатор занял место карты, колонка растягивается на всё
-            // освободившееся пространство вместо фиксированной четверти экрана.
+            // Колонка приборов забирает то, что осталось от ширины после карты и
+            // дока. Когда навигатор занял место карты, колонка растягивается на
+            // всё освободившееся пространство.
             val instruments: @Composable RowScope.() -> Unit = {
                 Column(
                     Modifier
-                        .then(if (mapCollapsed) Modifier.weight(1f) else Modifier.width(columnWidth))
+                        .weight(1f)
                         .fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -192,7 +204,7 @@ fun HomeScreen(
             val mapCell: @Composable RowScope.() -> Unit = {
                 map(
                     Modifier
-                        .weight(1f)
+                        .width(mapWidth)
                         .fillMaxHeight()
                 )
             }

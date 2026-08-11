@@ -64,6 +64,7 @@ import com.neondrive.launcher.input.SteeringWheelManager
 import com.neondrive.launcher.media.FmRadioController
 import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
+import com.neondrive.launcher.nav.FreeformSetup
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.overlay.NeonOverlayService
@@ -1196,9 +1197,15 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     val context = LocalContext.current
     val gps by SpeedProvider.state.collectAsState()
     val apps = remember { NavigatorBridge.installedNavApps(context) }
-    val freeform = remember { NavigatorBridge.freeformSupported(context) }
     val canOverlay = NeonOverlayService.canDraw(context)
     val frameActive by MapFrameController.active.collectAsState()
+
+    // Состояние freeform не `remember` без ключа: после нажатия «Включить» оно
+    // может измениться прямо в этой сессии (если разрешение уже было выдано),
+    // и подпись должна это показать, а не остаться прежней до перезахода в экран.
+    val scope = rememberCoroutineScope()
+    var freeformNote by remember { mutableStateOf<String?>(null) }
+    val freeform = remember(freeformNote) { NavigatorBridge.freeformSupported(context) }
 
     Column {
         SettingsSection("Приложение навигации", accent) {
@@ -1243,8 +1250,34 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                     accent = accent
                 ) { v -> edit { it.setMapSide(v) } }
             }
+            SettingRow(
+                "Доля экрана под навигацию",
+                "${s.mapScreenPercent} % ширины экрана" +
+                    (if (s.mapScreenPercent == 50) " — ровно половина" else ""),
+                accent
+            ) {
+                NeonSlider(
+                    value = s.mapScreenPercent.toFloat(),
+                    range = 30f..80f,
+                    accent = accent,
+                    modifier = Modifier.width(220.dp)
+                ) { v -> edit { it.setMapScreenPercent(v.roundToInt()) } }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SmallButton("Треть", accent2) { edit { it.setMapScreenPercent(33) } }
+                SmallButton("Половина", accent2) { edit { it.setMapScreenPercent(50) } }
+                SmallButton("Две трети", accent2) { edit { it.setMapScreenPercent(66) } }
+            }
             Hint(
-                "Сторона карты настраивается отдельно от стороны бокового меню — под " +
+                "Одно число управляет всеми режимами сразу. На рабочем столе это ширина " +
+                    "панели карты; в режиме «Во фрейме» её границы становятся границами " +
+                    "плавающего окна навигатора — то есть навигация физически занимает " +
+                    "ровно эту долю экрана; в режиме «Поверх карты» столько же остаётся " +
+                    "свободным между панелями оболочки.\n\n" +
+                    "Сторона карты настраивается отдельно от стороны бокового меню — под " +
                     "конкретное ГУ и посадку водителя. Когда навигатор поднят «во фрейме», " +
                     "с противоположной стороны остаётся свободная полоса: в неё оболочка " +
                     "вписывает настройки и остальные экраны, чтобы они не оказались под " +
@@ -1270,18 +1303,43 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
             if (s.mapMode == MapMode.FRAME) {
                 SettingRow(
                     "Поддержка плавающих окон",
-                    if (freeform) "Прошивка сообщает о поддержке freeform — режим будет работать"
-                    else "Прошивка о поддержке не сообщает. Включите freeform по инструкции " +
-                        "ниже или выберите режим «Поверх карты»",
+                    freeformNote ?: if (freeform)
+                        "Прошивка сообщает о поддержке freeform — навигация откроется окном " +
+                            "ровно по границам панели карты"
+                    else "Прошивка о поддержке не сообщает. Нажмите «Включить» — оболочка " +
+                        "попробует включить freeform сама",
                     if (freeform) accent2 else Neon.Amber
                 ) {
-                    SmallButton(if (freeform) "Готово" else "Нет", if (freeform) accent2 else Neon.Amber) {}
+                    if (freeform) {
+                        SmallButton("Готово", accent2) {}
+                    } else {
+                        SmallButton("Включить", Neon.Amber) {
+                            scope.launch {
+                                freeformNote = "Пробуем…"
+                                freeformNote = when (FreeformSetup.enable(context)) {
+                                    FreeformSetup.Result.ALREADY_ON ->
+                                        "Freeform уже включён — можно пользоваться режимом «Во фрейме»"
+                                    FreeformSetup.Result.WRITTEN_NEEDS_REBOOT ->
+                                        "Готово, настройки записаны. Перезагрузите головное " +
+                                            "устройство — freeform поднимается только при старте системы"
+                                    FreeformSetup.Result.NO_ACCESS ->
+                                        "Своими силами не вышло: нет ни разрешения, ни root. " +
+                                            "Выполните команду ниже с компьютера — она нужна один раз"
+                                }
+                            }
+                        }
+                    }
                 }
                 Hint(
-                    "Включение freeform на головном устройстве, один раз через adb:\n" +
-                        "adb shell settings put global enable_freeform_support 1\n" +
-                        "adb shell settings put global force_resizable_activities 1\n" +
-                        "После этого перезагрузите устройство.",
+                    "Freeform — единственный системный способ показать чужое приложение на " +
+                        "части экрана. Разделить экран пополам с лаунчером нельзя: домашний " +
+                        "экран Android в split-screen не пускает.\n\n" +
+                        "Разовая команда с компьютера, после которой оболочка включает " +
+                        "freeform сама и при последующих обновлениях:\n" +
+                        FreeformSetup.adbCommand(context) + "\n\n" +
+                        "Либо напрямую, без выдачи разрешения приложению:\n" +
+                        FreeformSetup.ADB_COMMAND_DIRECT + "\n\n" +
+                        "После любого из вариантов перезагрузите головное устройство.",
                     accent2
                 )
             }

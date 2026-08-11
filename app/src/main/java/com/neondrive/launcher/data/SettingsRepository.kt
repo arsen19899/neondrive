@@ -52,6 +52,7 @@ class SettingsRepository(private val context: Context) {
         val fmStations = stringPreferencesKey("fm_stations")
         val mapMode = stringPreferencesKey("map_mode")
         val mapSide = stringPreferencesKey("map_side")
+        val mapScreenPercent = intPreferencesKey("map_screen_percent")
         val mapAutoStart = booleanPreferencesKey("map_auto_start")
         val mapAutoStartDelay = intPreferencesKey("map_auto_start_delay")
         val homeLat = doublePreferencesKey("home_lat")
@@ -113,6 +114,7 @@ class SettingsRepository(private val context: Context) {
                 ?: d.mapMode,
             mapSide = p[K.mapSide]?.let { runCatching { SidebarSide.valueOf(it) }.getOrNull() }
                 ?: d.mapSide,
+            mapScreenPercent = (p[K.mapScreenPercent] ?: d.mapScreenPercent).coerceIn(30, 80),
             mapAutoStart = p[K.mapAutoStart] ?: d.mapAutoStart,
             mapAutoStartDelaySec = p[K.mapAutoStartDelay] ?: d.mapAutoStartDelaySec,
             homeLat = p[K.homeLat] ?: d.homeLat,
@@ -174,6 +176,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setFmStations(v: List<FmStation>) = put { it[K.fmStations] = encodeFm(v) }
     suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
     suspend fun setMapSide(v: SidebarSide) = put { it[K.mapSide] = v.name }
+    suspend fun setMapScreenPercent(v: Int) = put { it[K.mapScreenPercent] = v.coerceIn(30, 80) }
     suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }
     suspend fun setMapAutoStartDelay(sec: Int) = put {
         it[K.mapAutoStartDelay] = sec.coerceIn(0, 60)

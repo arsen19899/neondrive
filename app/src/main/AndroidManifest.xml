@@ -30,6 +30,19 @@
     <!-- Панели оболочки поверх запущенной навигации -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!--
+         Включение freeform-режима прошивки, без которого навигацию нельзя показать
+         на половине экрана (см. nav/FreeformSetup.kt). Разрешение защищено уровнем
+         signature|privileged — система его обычному приложению НЕ выдаст, и это
+         нормально: объявление здесь нужно лишь для того, чтобы разрешение можно
+         было выдать вручную одной командой с компьютера —
+         adb shell pm grant com.neondrive.launcher android.permission.WRITE_SECURE_SETTINGS
+         Без выданного разрешения объявление ни на что не влияет и ничего не ломает:
+         оболочка просто пойдёт другим путём (root или подсказка с командой adb).
+    -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- Контакты в экране телефона -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
