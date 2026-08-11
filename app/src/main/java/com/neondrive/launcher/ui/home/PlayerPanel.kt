@@ -79,15 +79,33 @@ fun PlayerPanel(
     NeonCard(modifier = modifier, accent = accent2) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             // Панель живёт в колонке произвольной ширины — от компактных ГУ 7"
-            // до широких приборных экранов. Подстраиваем размеры, чтобы контролы
-            // не наезжали друг на друга и не обрезались на узких экранах.
-            val narrow = maxWidth < 230.dp
-            val coverSize = if (narrow) 54.dp else 72.dp
-            val titleSize = if (narrow) 13.sp else 15.sp
-            val subtitleSize = if (narrow) 11.sp else 12.sp
-            val likeSize = if (narrow) 34.dp else 40.dp
-            val transportSize = if (narrow) 38.dp else 44.dp
-            val playSize = if (narrow) 48.dp else 56.dp
+            // до широких приборных экранов.
+            //
+            // Ниже 270 dp горизонтальная раскладка перестаёт работать в принципе:
+            // обложка и текст делят и без того узкую строку, название трека
+            // ужимается до трёх букв с многоточием, а три вкладки источника с
+            // подписями «С устройства» и «Яндекс.Музыка» превращаются в кашу.
+            // Такая ширина получается, когда под навигацию отдана большая доля
+            // экрана (две трети и выше) — то есть в самом востребованном режиме.
+            // Поэтому там рисуется отдельная вертикальная раскладка, где каждому
+            // элементу достаётся вся ширина колонки. Всё, что шире, рисуется ровно
+            // как раньше.
+            if (maxWidth < 270.dp) {
+                CompactPlayerBody(
+                    now = now, source = source, accent2 = accent2,
+                    liked = liked, canLike = canLike, connecting = connecting,
+                    onLike = onLike, onSource = onSource, onPlayPause = onPlayPause,
+                    onNext = onNext, onPrev = onPrev, onOpenLibrary = onOpenLibrary
+                )
+                return@BoxWithConstraints
+            }
+
+            val coverSize = 72.dp
+            val titleSize = 15.sp
+            val subtitleSize = 12.sp
+            val likeSize = 40.dp
+            val transportSize = 44.dp
+            val playSize = 56.dp
 
             Column(Modifier.fillMaxWidth()) {
 
@@ -114,7 +132,7 @@ fun PlayerPanel(
                         ) {
                             Text(
                                 s.label,
-                                fontSize = if (narrow) 9.sp else 10.sp,
+                                fontSize = 10.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 color = if (sel) accent2 else Neon.TextLow,
@@ -174,7 +192,7 @@ fun PlayerPanel(
                             now.subtitle,
                             color = Neon.TextLow,
                             fontSize = subtitleSize,
-                            maxLines = if (narrow) 1 else 2,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             lineHeight = 14.sp
                         )
@@ -245,6 +263,167 @@ fun PlayerPanel(
             }
         }
     }
+}
+
+/**
+ * Плеер для узкой колонки — когда под навигацию отдано две трети экрана и больше.
+ *
+ * Принцип другой, чем в основной раскладке: ничего не делит строку по горизонтали.
+ * Обложка занимает всю ширину карточкой, под ней название во всю ширину в две
+ * строки, ещё ниже транспорт. В таком порядке даже в 200 dp всё читается, тогда
+ * как ужимание горизонтальной раскладки давало обрезанные подписи и кнопки,
+ * в которые невозможно попасть на ходу.
+ *
+ * Подписи источников тоже короткие: «С устройства» и «Яндекс.Музыка» в треть
+ * колонки не помещаются ни при каком кегле.
+ */
+@Composable
+private fun CompactPlayerBody(
+    now: NowPlaying,
+    source: MusicSource,
+    accent2: Color,
+    liked: Boolean?,
+    canLike: Boolean,
+    connecting: Boolean,
+    onLike: () -> Unit,
+    onSource: (MusicSource) -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onOpenLibrary: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth()) {
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            MusicSource.entries.forEach { s ->
+                val sel = s == source
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (sel) accent2.copy(alpha = 0.20f) else Color(0x330C1424))
+                        .border(
+                            1.dp,
+                            if (sel) accent2.copy(alpha = 0.7f) else Color.Transparent,
+                            RoundedCornerShape(9.dp)
+                        )
+                        .clickable { onSource(s) }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        shortSourceLabel(s),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (sel) accent2 else Neon.TextLow,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Обложка во всю ширину колонки: на узкой панели это единственное место,
+        // где она вообще имеет смысл — сбоку от текста она съедала бы половину
+        // строки и не давала прочитать ни название, ни исполнителя.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .neonGlow(accent2, 14.dp, if (now.isPlaying) 0.30f else 0.10f, 10.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF0C1424))
+                .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                .clickable { onOpenLibrary() },
+            contentAlignment = Alignment.Center
+        ) {
+            if (now.artUri != null) {
+                AsyncImage(
+                    model = now.artUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxWidth().height(96.dp)
+                )
+            } else {
+                Icon(
+                    Icons.Rounded.LibraryMusic, null,
+                    tint = accent2.copy(alpha = 0.55f),
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        HudLabel(
+            if (connecting) "Подключение…" else now.sourceLabel.ifBlank { source.label },
+            accent2
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            now.title,
+            color = Neon.TextHi,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            lineHeight = 17.sp
+        )
+        Text(
+            now.subtitle,
+            color = Neon.TextLow,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        if (now.durationMs > 0) {
+            ProgressLine(
+                fraction = (now.positionMs.toFloat() / now.durationMs).coerceIn(0f, 1f),
+                accent = accent2
+            )
+        } else {
+            SpectrumLine(active = now.isPlaying, accent = accent2)
+        }
+
+        Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RoundBtn(Icons.Rounded.SkipPrevious, accent2, 40.dp, onClick = onPrev)
+            RoundBtn(
+                if (now.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                accent2, 52.dp, filled = true, onClick = onPlayPause
+            )
+            RoundBtn(Icons.Rounded.SkipNext, accent2, 40.dp, onClick = onNext)
+            if (canLike) {
+                RoundBtn(
+                    if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    if (liked == true) Neon.Magenta else Neon.TextMid,
+                    40.dp,
+                    filled = liked == true,
+                    onClick = onLike
+                )
+            }
+        }
+    }
+}
+
+/** Короткие подписи источников — длинные в треть узкой колонки не помещаются. */
+private fun shortSourceLabel(source: MusicSource): String = when (source) {
+    MusicSource.DEVICE -> "Файлы"
+    MusicSource.RADIO -> "Радио"
+    MusicSource.YANDEX -> "Я.Музыка"
 }
 
 @Composable

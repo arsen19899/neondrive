@@ -1,6 +1,5 @@
 package com.neondrive.launcher.ui.home
 
-import android.graphics.Rect
 import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,11 +22,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.RotateRight
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Straight
+import androidx.compose.material.icons.rounded.TurnLeft
+import androidx.compose.material.icons.rounded.TurnRight
+import androidx.compose.material.icons.rounded.TurnSharpLeft
+import androidx.compose.material.icons.rounded.TurnSharpRight
+import androidx.compose.material.icons.rounded.TurnSlightLeft
+import androidx.compose.material.icons.rounded.TurnSlightRight
+import androidx.compose.material.icons.rounded.UTurnLeft
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -35,6 +48,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,31 +60,37 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.automation.GpsState
+import com.neondrive.launcher.data.FavoritePlace
 import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MapMode
+import com.neondrive.launcher.data.SettingsRepository
+import com.neondrive.launcher.nav.GuidanceEngine
+import com.neondrive.launcher.nav.HazardHub
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
+import com.neondrive.launcher.nav.RouteHub
+import com.neondrive.launcher.nav.formatDistance
+import com.neondrive.launcher.nav.formatDuration
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonGlow
 import com.neondrive.launcher.ui.theme.neonPanel
-import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
- * Панель навигации — две трети рабочего стола.
+ * Панель навигации — заданная настройками доля рабочего стола.
  *
- * Панель постоянно сообщает свои экранные границы в [MapFrameController]: по ним
- * навигационное приложение поднимается плавающим окном ровно в этот прямоугольник
- * (режим «Во фрейме») либо на весь экран с панелями оболочки поверх (режим
- * «Поверх карты»). Пока приложение не поднято, панель рисует собственный HUD по
- * данным GPS, чтобы рабочий стол не выглядел пустым.
+ * Два режима, и они устроены совершенно по-разному:
+ *  • [MapMode.EMBEDDED] — здесь живёт настоящая карта оболочки со своим поиском,
+ *    маршрутом, карточкой манёвра и голосом. Сторонний навигатор не нужен;
+ *  • [MapMode.OVERLAY] — панель рисует стилизованный HUD по данным GPS, а по
+ *    нажатию открывает чужой навигатор на весь экран и кладёт панели оболочки
+ *    поверх него.
  */
 @Composable
 fun MapPanel(
@@ -81,6 +101,11 @@ fun MapPanel(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Свой экземпляр репозитория, а не проброс сверху: DataStore под ним — синглтон
+    // на приложение, так что это просто тонкая обёртка над тем же хранилищем, зато
+    // сигнатура MapPanel не тянет за собой лишний параметр через весь рабочий стол.
+    val repo = remember(context) { SettingsRepository(context.applicationContext) }
     val overlayActive by MapFrameController.active.collectAsState()
     val navLabel = remember(settings.mapPackage) {
         NavigatorBridge.labelOf(context, settings.mapPackage)
@@ -95,18 +120,31 @@ fun MapPanel(
     // кнопке внизу справа.
     var follow by remember { mutableStateOf(true) }
     var zoom by remember { mutableStateOf(16.0) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var manualZoom by remember { mutableStateOf(false) }
+    val route by RouteHub.state.collectAsState()
+    val guidance by GuidanceEngine.state.collectAsState()
+    val hazard by HazardHub.state.collectAsState()
+
+    /** Запустить ведение до выбранной точки. */
+    val goTo: (Double, Double, String) -> Unit = { lat, lon, title ->
+        if (gps.hasFix) {
+            RouteHub.buildTo(
+                context = context,
+                fromLat = gps.lastLat,
+                fromLon = gps.lastLon,
+                toLat = lat,
+                toLon = lon,
+                title = title
+            )
+            follow = true
+        } else {
+            Toast.makeText(context, "Нет сигнала GPS — маршрут не построить", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Box(
         modifier
-            .onGloballyPositioned { coords ->
-                val r = coords.boundsInWindow()
-                MapFrameController.updateBounds(
-                    Rect(
-                        r.left.roundToInt(), r.top.roundToInt(),
-                        r.right.roundToInt(), r.bottom.roundToInt()
-                    )
-                )
-            }
             .neonGlow(accent, 26.dp, 0.14f, 16.dp)
             .neonPanel(accent, radius = 26.dp)
             .clip(RoundedCornerShape(26.dp))
@@ -119,10 +157,129 @@ fun MapPanel(
                 modifier = Modifier.fillMaxSize(),
                 follow = follow,
                 onUserPanned = { follow = false },
-                zoomRequest = zoom
+                zoomRequest = zoom,
+                route = route.points,
+                rotateByBearing = settings.navRotateMap,
+                // Ручной зум должен побеждать автоматический, иначе кнопки «+/−»
+                // выглядят сломанными: нажал — и масштаб тут же уехал обратно.
+                autoZoom = settings.navAutoZoom && !manualZoom
             )
         } else {
             MapCanvas(accent = accent, accent2 = accent2, moving = gps.speedKmh > 1f)
+        }
+
+        // Карточка манёвра — поверх карты, по центру сверху. Появляется только
+        // во время ведения и вытесняет обычную шапку панели.
+        if (embedded && guidance.active && guidance.instruction.isNotBlank()) {
+            ManeuverCard(
+                guidance = guidance,
+                accent = accent,
+                accent2 = accent2,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(12.dp)
+            )
+        }
+
+        // Кнопки масштаба — вертикальной парой у правого края, как в любом
+        // нормальном навигаторе. Раньше зум висел мелкими чипами в общем ряду
+        // внизу и на ходу в них было не попасть.
+        if (embedded) {
+            Column(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ZoomButton(Icons.Rounded.Add, "Приблизить", accent) {
+                    manualZoom = true
+                    zoom = (zoom + 1.0).coerceAtMost(19.0)
+                }
+                ZoomButton(Icons.Rounded.Remove, "Отдалить", accent) {
+                    manualZoom = true
+                    zoom = (zoom - 1.0).coerceAtLeast(3.0)
+                }
+            }
+        }
+
+        // Знак ограничения и камера — слева снизу, крупно и по правилам дорожного
+        // знака: белый круг, красная кайма. При превышении круг заливается красным,
+        // чтобы это ловилось боковым зрением, без чтения цифры.
+        if (embedded && (hazard.speedLimitKmh != null || hazard.cameraAheadM != null)) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 14.dp, bottom = 62.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                hazard.speedLimitKmh?.let { limit ->
+                    SpeedLimitSign(limit = limit, speeding = hazard.speeding)
+                }
+                hazard.cameraAheadM?.let { dist ->
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Color(0xCC1A0A12))
+                            .border(1.dp, Neon.Red.copy(alpha = 0.7f), RoundedCornerShape(15.dp))
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.PhotoCamera, "Камера",
+                            tint = Neon.Red, modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.size(7.dp))
+                        Text(
+                            formatDistance(dist),
+                            color = Neon.TextHi,
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        // Выбор варианта маршрута. Показываем только пока не тронулись: менять
+        // маршрут на скорости — плохая идея, да и читать три плашки за рулём некогда.
+        if (embedded && route.hasAlternatives && gps.speedKmh < 5f) {
+            Column(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                route.options.forEachIndexed { i, option ->
+                    val sel = i == route.selected
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(if (sel) accent2.copy(alpha = 0.22f) else Color(0xCC060B14))
+                            .border(
+                                1.dp,
+                                (if (sel) accent2 else accent).copy(alpha = if (sel) 0.8f else 0.3f),
+                                RoundedCornerShape(13.dp)
+                            )
+                            .clickable { RouteHub.selectOption(context, i) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (i == 0) "Оптимальный" else "Вариант ${i + 1}",
+                            color = if (sel) accent2 else Neon.TextLow,
+                            fontSize = 11.sp
+                        )
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            option.label,
+                            color = Neon.TextHi,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
         }
 
         Row(
@@ -177,10 +334,7 @@ fun MapPanel(
                     .padding(horizontal = 22.dp, vertical = 14.dp)
             ) {
                 Text(
-                    if (settings.mapMode == MapMode.FRAME)
-                        "Нажмите, чтобы открыть $navLabel во фрейме"
-                    else
-                        "Нажмите, чтобы открыть $navLabel с панелями поверх",
+                    "Нажмите, чтобы открыть $navLabel с панелями поверх",
                     fontSize = 12.sp,
                     color = accent2,
                     fontWeight = FontWeight.Medium
@@ -196,50 +350,66 @@ fun MapPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // «Куда» — вход в собственный поиск: адреса, названия и ближайшие
+            // места по категориям. Первым в ряду, потому что это главное действие
+            // навигации: остальное — вспомогательное.
+            if (embedded) {
+                QuickChip("Куда", Icons.Rounded.Search, accent2) { searchOpen = true }
+            }
+
             QuickChip("Домой", Icons.Rounded.Home, accent) {
-                if (settings.hasHomePoint) {
+                if (!settings.hasHomePoint) {
+                    Toast.makeText(
+                        context,
+                        "Точка «Дом» не задана: настройки оболочки → Навигатор",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (embedded) {
+                    // Своя карта ведёт сама: строим маршрут, показываем линию,
+                    // манёвры и озвучиваем повороты — сторонний навигатор не нужен.
+                    goTo(settings.homeLat, settings.homeLon, "Дом")
+                } else {
+                    // В режиме «Поверх карты» рисует чужое приложение, поэтому
+                    // маршрут отдаём ему — своей линии там некуда лечь.
                     NavigatorBridge.buildRoute(
                         context, settings.mapPackage,
                         settings.homeLat, settings.homeLon,
                         gps.lastLat.takeIf { gps.hasFix },
                         gps.lastLon.takeIf { gps.hasFix }
                     )
-                } else {
-                    Toast.makeText(
-                        context,
-                        "Точка «Дом» не задана: настройки оболочки → Навигатор",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-            QuickChip("Я здесь", Icons.Rounded.MyLocation, accent) {
-                if (gps.hasFix) {
-                    NavigatorBridge.showPoint(
-                        context, settings.mapPackage, gps.lastLat, gps.lastLon, 16, "Моя позиция"
-                    )
-                } else {
-                    Toast.makeText(context, "Нет GPS-фикса", Toast.LENGTH_SHORT).show()
-                }
-            }
-            if (overlayActive) {
-                QuickChip("Убрать панели", Icons.Rounded.VisibilityOff, Neon.Red) {
-                    MapFrameController.stop(context)
                 }
             }
 
-            // Управление своей картой. Зум нужен потому, что штатные кнопки
-            // osmdroid отключены (чужеродно смотрятся), а щипок двумя пальцами на
-            // ходу за рулём — так себе идея. «К себе» возвращает следование за
-            // машиной после того, как карту подвинули рукой.
             if (embedded) {
-                QuickChip("Отдалить", Icons.Rounded.Remove, accent) {
-                    zoom = (zoom - 1.0).coerceAtLeast(3.0)
-                }
-                QuickChip("Приблизить", Icons.Rounded.Add, accent) {
-                    zoom = (zoom + 1.0).coerceAtMost(19.0)
-                }
                 if (!follow) {
                     QuickChip("К себе", Icons.Rounded.MyLocation, accent2) { follow = true }
+                }
+                if (route.hasRoute || route.loading) {
+                    QuickChip(
+                        when {
+                            route.loading -> "Строим маршрут…"
+                            guidance.active -> "${guidance.remainingLabel} · ${guidance.etaLabel}"
+                            else -> "${formatDistance(route.distanceM)} · " +
+                                formatDuration(route.durationSec)
+                        },
+                        Icons.Rounded.Close,
+                        if (route.loading) Neon.TextLow else Neon.Red
+                    ) { RouteHub.clear() }
+                }
+            } else {
+                QuickChip("Я здесь", Icons.Rounded.MyLocation, accent) {
+                    if (gps.hasFix) {
+                        NavigatorBridge.showPoint(
+                            context, settings.mapPackage, gps.lastLat, gps.lastLon, 16, "Моя позиция"
+                        )
+                    } else {
+                        Toast.makeText(context, "Нет GPS-фикса", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                if (overlayActive) {
+                    QuickChip("Убрать панели", Icons.Rounded.VisibilityOff, Neon.Red) {
+                        MapFrameController.stop(context)
+                    }
                 }
             }
 
@@ -262,8 +432,7 @@ fun MapPanel(
                     Spacer(Modifier.size(7.dp))
                     Text(
                         when (settings.mapMode) {
-                            MapMode.EMBEDDED -> "НАВИГАТОР"
-                            MapMode.FRAME -> "ВО ФРЕЙМЕ"
+                            MapMode.EMBEDDED -> navLabel.uppercase()
                             MapMode.OVERLAY -> "ПОВЕРХ КАРТЫ"
                         },
                         fontSize = 11.sp,
@@ -276,6 +445,168 @@ fun MapPanel(
             }
         }
     }
+
+    if (searchOpen) {
+        NavSearchDialog(
+            accent = accent,
+            accent2 = accent2,
+            currentLat = gps.lastLat,
+            currentLon = gps.lastLon,
+            hasFix = gps.hasFix,
+            favorites = settings.navFavorites,
+            history = settings.navSearchHistory,
+            onPick = { place ->
+                searchOpen = false
+                goTo(place.lat, place.lon, place.name)
+                scope.launch { runCatching { repo.pushSearchHistory(place.name) } }
+            },
+            onSaveFavorite = { place ->
+                scope.launch {
+                    runCatching {
+                        val next = (settings.navFavorites
+                            .filter { !it.name.equals(place.name, ignoreCase = true) } +
+                            FavoritePlace(place.name, place.lat, place.lon)).takeLast(12)
+                        repo.setNavFavorites(next)
+                    }
+                }
+                Toast.makeText(context, "«${place.name}» в избранном", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { searchOpen = false }
+        )
+    }
+}
+
+/**
+ * Знак ограничения скорости — узнаваемый круг с красной каймой.
+ *
+ * Рисуется по правилам дорожного знака, а не в неоновой палитре оболочки: это тот
+ * редкий случай, когда стиль должен уступить узнаваемости. Водитель считывает этот
+ * круг рефлекторно, и перекрашивать его в циан было бы вредительством.
+ */
+@Composable
+private fun SpeedLimitSign(limit: Int, speeding: Boolean) {
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(if (speeding) Neon.Red else Color.White)
+            .border(
+                4.dp,
+                if (speeding) Color.White else Neon.Red,
+                RoundedCornerShape(26.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            limit.toString(),
+            color = if (speeding) Color.White else Color.Black,
+            fontSize = if (limit >= 100) 17.sp else 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/** Круглая кнопка масштаба у края карты — крупная, чтобы попадать на ходу. */
+@Composable
+private fun ZoomButton(
+    icon: ImageVector,
+    description: String,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(15.dp))
+            .background(Color(0xCC060B14))
+            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(15.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, description, tint = accent, modifier = Modifier.size(22.dp))
+    }
+}
+
+/**
+ * Карточка следующего манёвра: стрелка, расстояние, куда поворачивать и что будет
+ * дальше. Расстояние крупно и слева — за рулём взгляд цепляется именно за него.
+ */
+@Composable
+private fun ManeuverCard(
+    guidance: com.neondrive.launcher.nav.GuidanceState,
+    accent: Color,
+    accent2: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xE6060B14))
+            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            maneuverIcon(guidance.maneuverType, guidance.maneuverModifier),
+            null,
+            tint = accent,
+            modifier = Modifier.size(30.dp)
+        )
+        Spacer(Modifier.size(12.dp))
+        Column {
+            Text(
+                if (guidance.rerouting) "Перестраиваю маршрут" else guidance.distanceLabel,
+                color = accent,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                guidance.instruction,
+                color = Neon.TextHi,
+                fontSize = 14.sp,
+                maxLines = 1
+            )
+            if (guidance.thenInstruction.isNotBlank()) {
+                Text(
+                    "затем ${guidance.thenInstruction}",
+                    color = Neon.TextLow,
+                    fontSize = 11.sp,
+                    maxLines = 1
+                )
+            }
+        }
+        Spacer(Modifier.size(16.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                guidance.remainingLabel,
+                color = accent2,
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                guidance.etaLabel,
+                color = Neon.TextLow,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
+/** Стрелка под тип манёвра OSRM. */
+private fun maneuverIcon(type: String, modifier: String): ImageVector = when {
+    type == "arrive" -> Icons.Rounded.Flag
+    type == "roundabout" || type == "rotary" || type == "roundabout turn" ->
+        Icons.Rounded.RotateRight
+    modifier.contains("uturn") -> Icons.Rounded.UTurnLeft
+    modifier.contains("sharp left") -> Icons.Rounded.TurnSharpLeft
+    modifier.contains("sharp right") -> Icons.Rounded.TurnSharpRight
+    modifier.contains("slight left") -> Icons.Rounded.TurnSlightLeft
+    modifier.contains("slight right") -> Icons.Rounded.TurnSlightRight
+    modifier.contains("left") -> Icons.Rounded.TurnLeft
+    modifier.contains("right") -> Icons.Rounded.TurnRight
+    else -> Icons.Rounded.Straight
 }
 
 @Composable

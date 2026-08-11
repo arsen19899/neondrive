@@ -21,12 +21,10 @@ import com.neondrive.launcher.automation.FuelStationHub
 import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.automation.WeatherHub
 import com.neondrive.launcher.data.LauncherSettings
-import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SidebarSide
 import com.neondrive.launcher.media.NowPlaying
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.ui.NeonScreen
 
 /**
@@ -71,12 +69,6 @@ fun HomeScreen(
     val liked by PlayerHub.external.liked.collectAsState()
     val canLike by PlayerHub.external.canLike.collectAsState()
     val connecting by PlayerHub.connectingYandex.collectAsState()
-
-    // Пока навигатор поднят «во фрейме», настоящее приложение уже стоит ровно там,
-    // где раньше была карта-обманка — панель карты больше не нужна, а освободившееся
-    // место отдаём приборам. Док с часами при этом сохраняет свой размер.
-    val navFrameActive by MapFrameController.active.collectAsState()
-    val mapCollapsed = navFrameActive && settings.mapMode == MapMode.FRAME
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Портретный экран (планшет/ГУ, поставленный на попа) шире, чем выше —
@@ -139,17 +131,13 @@ fun HomeScreen(
         }
 
         val map: @Composable (Modifier) -> Unit = { m ->
-            // Карта — всё остальное пространство. Пока настоящий навигатор поднят
-            // во фрейме, панель-заглушка не нужна: реальное окно уже стоит на её месте.
-            if (!mapCollapsed) {
-                MapPanel(
-                    gps = gps,
-                    settings = settings,
-                    accent = accent,
-                    accent2 = accent2,
-                    modifier = m
-                )
-            }
+            MapPanel(
+                gps = gps,
+                settings = settings,
+                accent = accent,
+                accent2 = accent2,
+                modifier = m
+            )
         }
 
         if (isPortrait) {
@@ -173,12 +161,10 @@ fun HomeScreen(
             }
         } else {
             // Ширину задаёт панель карты, а не колонка приборов — так «половина
-            // экрана под навигацию» означает ровно половину. Это принципиально:
-            // в режиме FRAME границы именно этой панели уходят в
-            // ActivityOptions.setLaunchBounds и становятся границами плавающего
-            // окна навигатора. Раньше доля была зашита константой (колонка
-            // приборов = 25 %, карте доставался весь остаток минус док, то есть
-            // около 66 %), и получить половину было невозможно.
+            // экрана под навигацию» означает ровно половину. Раньше доля была
+            // зашита константой (колонка приборов = 25 %, карте доставался весь
+            // остаток минус док, то есть около 66 %), и получить половину было
+            // невозможно.
             // Верхняя граница страхует узкие 7" ГУ: даже при доле 80 % колонке
             // приборов остаётся место, а не отрицательная ширина, при которой
             // плеер и спидометр просто уезжали бы за край экрана.
@@ -186,9 +172,7 @@ fun HomeScreen(
                 .coerceAtMost(maxWidth - 260.dp)
                 .coerceAtLeast(maxWidth * 0.25f)
 
-            // Колонка приборов забирает то, что осталось от ширины после карты и
-            // дока. Когда навигатор занял место карты, колонка растягивается на
-            // всё освободившееся пространство.
+            // Колонка приборов забирает то, что осталось от ширины после карты и дока.
             val instruments: @Composable RowScope.() -> Unit = {
                 Column(
                     Modifier
@@ -219,10 +203,7 @@ fun HomeScreen(
 
                 // Сторона карты относительно приборов настраивается отдельно от
                 // стороны дока: на разных ГУ удобной оказывается разная комбинация
-                // (руль слева/справа, экран смещён к водителю). Свободная полоса,
-                // в которую вписываются вторичные экраны при поднятом фрейме,
-                // считается по фактическим границам панели карты, поэтому оба
-                // варианта отрабатывают одинаково — см. FrameSafeArea в NeonRoot.
+                // (руль слева/справа, экран смещён к водителю).
                 if (settings.mapSide == SidebarSide.LEFT) {
                     mapCell()
                     instruments()

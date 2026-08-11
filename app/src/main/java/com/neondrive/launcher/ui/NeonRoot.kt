@@ -27,12 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.neondrive.launcher.automation.AutomationService
 import com.neondrive.launcher.automation.SpeedProvider
 import com.neondrive.launcher.data.LauncherSettings
-import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
@@ -48,7 +46,6 @@ import com.neondrive.launcher.ui.settings.SettingsScreen
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.NeonBackdrop
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class NeonScreen { HOME, APPS, SETTINGS, EQUALIZER, MUSIC, PHONE }
@@ -86,14 +83,10 @@ fun NeonRoot(
         runCatching { PlayerHub.refreshLibrary() }
     }
 
-    // Автозапуск навигации во фрейме. Для плавающего окна сначала дожидаемся,
-    // пока панель карты сообщит свои экранные границы.
+    // Автозапуск навигации. В режиме своей карты не делает ничего — карта уже
+    // на рабочем столе; см. MapFrameController.autoStartIfNeeded.
     LaunchedEffect(settings.mapAutoStart, settings.mapMode, settings.mapPackage) {
-        runCatching {
-            MapFrameController.autoStartIfNeeded(context, settings) {
-                MapFrameController.frameBounds.first { !it.isEmpty }
-            }
-        }
+        runCatching { MapFrameController.autoStartIfNeeded(context, settings) }
     }
 
     NeonBackdrop(
@@ -102,15 +95,13 @@ fun NeonRoot(
         backgroundImagePath = settings.backgroundImagePath,
         backgroundDarken = settings.backgroundDarken
     ) {
-        // compact — единый сигнал для всех вторичных экранов: портретный экран
-        // (та же проверка, что и на рабочем столе в HomeScreen) ИЛИ карта поднята
-        // «во фрейме» (часть экрана занята плавающим окном навигатора, а под
-        // настройки остаётся узкая полоса). На обычном ландшафтном экране без
-        // фрейма ничего не меняется — интерфейс ровно тот, что был всегда.
-        val frameActive by MapFrameController.active.collectAsState()
+        // compact — единый сигнал для всех вторичных экранов: на портретном экране
+        // шапки перестраиваются, действия уезжают отдельной прокручиваемой строкой.
+        // Раньше сюда же входил режим «во фрейме», когда часть экрана занимало
+        // плавающее окно навигатора; режим удалён вместе с этой веткой.
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val isPortrait = maxHeight > maxWidth
-            val compact = isPortrait || (frameActive && settings.mapMode == MapMode.FRAME)
+            val compact = isPortrait
 
             CompositionLocalProvider(LocalCompactUi provides compact) {
                 // Box, а не голый AnimatedContent — сверху рисуется CallOverlay:
@@ -155,10 +146,8 @@ fun NeonRoot(
                                 },
                                 onOpenLibrary = { screen = NeonScreen.MUSIC },
                                 onPhone = { screen = NeonScreen.PHONE },
-                                // Тумблер, а не просто «запустить»: повторное нажатие
-                                // сворачивает фрейм. Иначе свернуть его изнутри
-                                // оболочки было нечем — панель карты с чипом
-                                // «Убрать панели» в режиме FRAME не рисуется.
+                                // Тумблер, а не просто «запустить»: повторное
+                                // нажатие убирает панели поверх навигатора.
                                 onNavigation = { MapFrameController.toggle(context, settings) },
                                 onEqualizer = { screen = NeonScreen.EQUALIZER },
                                 onAndroidSettings = {
@@ -173,7 +162,7 @@ fun NeonRoot(
                                 onLauncherSettings = { screen = NeonScreen.SETTINGS }
                             )
 
-                            NeonScreen.APPS -> FrameSafeArea(settings) {
+                            NeonScreen.APPS -> {
                                 AllAppsScreen(
                                     accent = accent,
                                     accent2 = accent2,
@@ -181,7 +170,7 @@ fun NeonRoot(
                                 )
                             }
 
-                            NeonScreen.MUSIC -> FrameSafeArea(settings) {
+                            NeonScreen.MUSIC -> {
                                 MusicScreen(
                                     accent = accent,
                                     accent2 = accent2,
@@ -189,7 +178,7 @@ fun NeonRoot(
                                 )
                             }
 
-                            NeonScreen.EQUALIZER -> FrameSafeArea(settings) {
+                            NeonScreen.EQUALIZER -> {
                                 EqualizerScreen(
                                     accent = accent,
                                     accent2 = accent2,
@@ -197,7 +186,7 @@ fun NeonRoot(
                                 )
                             }
 
-                            NeonScreen.PHONE -> FrameSafeArea(settings) {
+                            NeonScreen.PHONE -> {
                                 PhoneScreen(
                                     accent = accent,
                                     accent2 = accent2,
@@ -205,7 +194,7 @@ fun NeonRoot(
                                 )
                             }
 
-                            NeonScreen.SETTINGS -> FrameSafeArea(settings) {
+                            NeonScreen.SETTINGS -> {
                                 SettingsScreen(
                                     settings = settings,
                                     accent = accent,
@@ -219,94 +208,6 @@ fun NeonRoot(
 
                     CallOverlay(accent = accent, accent2 = accent2)
                 }
-            }
-        }
-    }
-}
-
-/**
- * Обёртка для всех экранов, кроме рабочего стола.
- *
- * Пока навигатор поднят «во фрейме» (MapMode.FRAME + MapFrameController.active),
- * его плавающее окно — отдельное окно системы, а не часть нашего UI. Оно висит
- * поверх части экрана ровно там, где раньше была панель карты, и остаётся там
- * независимо от того, что сейчас показывает оболочка под ним. Если рисовать
- * настройки (или любой другой экран) на весь экран как обычно, часть их —
- * там, где раньше была карта — физически перекрыта окном навигатора: не видна
- * и не нажимается.
- *
- * Поэтому в момент, когда навигатор во фрейме активен, контент вписывается
- * только в свободную полосу — ту же, что на рабочем столе занимают док и
- * колонка приборов (её границы — это буквально всё, что не входит в
- * [MapFrameController.frameBounds], последний раз сообщённый панелью карты).
- * В режиме «Поверх карты» и когда фрейм не активен, экран занимает всё место
- * как раньше.
- */
-@Composable
-private fun FrameSafeArea(
-    settings: LauncherSettings,
-    content: @Composable () -> Unit
-) {
-    val frameActive by MapFrameController.active.collectAsState()
-    if (!frameActive || settings.mapMode != MapMode.FRAME) {
-        content()
-        return
-    }
-
-    val bounds by MapFrameController.frameBounds.collectAsState()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (bounds.isEmpty) {
-            // Границы ещё не запоминались (например, оболочку перезапустили, пока
-            // навигатор уже был поднят) — безопаснее показать во весь экран, чем
-            // угадать не туда.
-            content()
-            return@BoxWithConstraints
-        }
-        val density = LocalDensity.current
-        val screenWidthPx = with(density) { maxWidth.toPx() }
-
-        // Карта в портретной раскладке занимает всю ширину и нижнюю часть высоты;
-        // в ландшафтной — всю высоту и часть ширины сбоку. По этому признаку и
-        // определяем, где искать свободную полосу.
-        val mapSpansFullWidth = bounds.width() >= screenWidthPx * 0.85f
-
-        // Свободная полоса имеет смысл, только если в неё вообще что-то влезает.
-        // Если окно навигатора съело почти весь экран, полоска в пару десятков
-        // пикселей бесполезна — показываем экран целиком: пусть часть и окажется
-        // под окном навигатора, это всё равно лучше, чем нечитаемая щель.
-        val minUsable = 160.dp
-
-        Box(Modifier.fillMaxSize().padding(12.dp)) {
-            if (mapSpansFullWidth) {
-                val freeHeight = with(density) { bounds.top.toFloat().coerceAtLeast(0f).toDp() }
-                if (freeHeight < minUsable) {
-                    content()
-                    return@Box
-                }
-                // Контент внутри полосы прокручивается сам (LazyColumn / verticalScroll
-                // в компактных раскладках экранов), поэтому то, что не поместилось
-                // по высоте, не обрезается — до него можно домотать прокруткой.
-                Box(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .height(freeHeight)
-                ) { content() }
-            } else {
-                val freeLeftPx = bounds.left.toFloat().coerceAtLeast(0f)
-                val freeRightPx = (screenWidthPx - bounds.right).coerceAtLeast(0f)
-                val onLeft = freeLeftPx >= freeRightPx
-                val freeWidth = with(density) { (if (onLeft) freeLeftPx else freeRightPx).toDp() }
-                if (freeWidth < minUsable) {
-                    content()
-                    return@Box
-                }
-                Box(
-                    Modifier
-                        .align(if (onLeft) Alignment.TopStart else Alignment.TopEnd)
-                        .width(freeWidth)
-                        .fillMaxHeight()
-                ) { content() }
             }
         }
     }

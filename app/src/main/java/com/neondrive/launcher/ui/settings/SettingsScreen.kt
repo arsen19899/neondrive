@@ -64,9 +64,9 @@ import com.neondrive.launcher.input.SteeringWheelManager
 import com.neondrive.launcher.media.FmRadioController
 import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.FreeformSetup
 import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
+import com.neondrive.launcher.nav.OfflineRouter
 import com.neondrive.launcher.overlay.NeonOverlayService
 import com.neondrive.launcher.phone.BluetoothDevicesRepository
 import com.neondrive.launcher.phone.PairedBtDevice
@@ -1198,14 +1198,12 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     val gps by SpeedProvider.state.collectAsState()
     val apps = remember { NavigatorBridge.installedNavApps(context) }
     val canOverlay = NeonOverlayService.canDraw(context)
+    // Статус офлайн-графа читается один раз за открытие экрана: проверка лезет на
+    // флеш-память ГУ и в первый раз может занять секунды.
+    val offlineReady = remember { OfflineRouter.isReady(context) }
+    val offlineStatus = remember { OfflineRouter.status(context) }
     val frameActive by MapFrameController.active.collectAsState()
 
-    // Состояние freeform не `remember` без ключа: после нажатия «Включить» оно
-    // может измениться прямо в этой сессии (если разрешение уже было выдано),
-    // и подпись должна это показать, а не остаться прежней до перезахода в экран.
-    val scope = rememberCoroutineScope()
-    var freeformNote by remember { mutableStateOf<String?>(null) }
-    val freeform = remember(freeformNote) { NavigatorBridge.freeformSupported(context) }
 
     Column {
         SettingsSection("Приложение навигации", accent) {
@@ -1273,20 +1271,15 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
             }
             Hint(
                 "Одно число управляет всеми режимами сразу. На рабочем столе это ширина " +
-                    "панели карты; в режиме «Во фрейме» её границы становятся границами " +
-                    "плавающего окна навигатора — то есть навигация физически занимает " +
-                    "ровно эту долю экрана; в режиме «Поверх карты» столько же остаётся " +
+                    "панели карты, в режиме «Поверх карты» — столько же остаётся " +
                     "свободным между панелями оболочки.\n\n" +
                     "Сторона карты настраивается отдельно от стороны бокового меню — под " +
-                    "конкретное ГУ и посадку водителя. Когда навигатор поднят «во фрейме», " +
-                    "с противоположной стороны остаётся свободная полоса: в неё оболочка " +
-                    "вписывает настройки и остальные экраны, чтобы они не оказались под " +
-                    "плавающим окном навигатора.",
+                    "конкретное ГУ и посадку водителя.",
                 accent2
             )
         }
 
-        SettingsSection("Карта во фрейме", accent2) {
+        SettingsSection("Режим карты", accent2) {
             SettingRow(
                 "Режим показа",
                 s.mapMode.hint,
@@ -1301,62 +1294,131 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
             }
 
             if (s.mapMode == MapMode.EMBEDDED) {
+                SettingRow(
+                    "Голосовое ведение",
+                    if (s.navVoice)
+                        "Оболочка озвучивает манёвры сама. Нужен русский голос в системе — " +
+                            "если его нет, ведение останется молчаливым, карточка манёвра на " +
+                            "экране никуда не денется"
+                    else "Манёвры показываются только на экране, без звука",
+                    accent2
+                ) {
+                    NeonToggle(s.navVoice, accent2) { v -> edit { it.setNavVoice(v) } }
+                }
+                if (s.navVoice) {
+                    SettingRow(
+                        "Громкость подсказок",
+                        "${s.navVoiceVolume} % — отдельно от громкости музыки",
+                        accent2
+                    ) {
+                        NeonSlider(
+                            value = s.navVoiceVolume.toFloat(),
+                            range = 10f..100f,
+                            accent = accent2,
+                            modifier = Modifier.width(220.dp)
+                        ) { v -> edit { it.setNavVoiceVolume(v.roundToInt()) } }
+                    }
+                    SettingRow(
+                        "Приглушать музыку на подсказке",
+                        if (s.navDuckMusic)
+                            "Плеер и радио временно убавляют громкость и сами возвращают её " +
+                                "обратно — стандартный механизм Android, работает и со сторонними " +
+                                "плеерами, и с Bluetooth"
+                        else "Подсказка звучит поверх музыки на полной громкости",
+                        accent2
+                    ) {
+                        NeonToggle(s.navDuckMusic, accent2) { v -> edit { it.setNavDuckMusic(v) } }
+                    }
+                }
+
+                SettingRow(
+                    "Предупреждать о камерах",
+                    "Камеры берутся из OpenStreetMap вдоль маршрута; в Беларуси " +
+                        "стационарные размечены неплохо. Предупреждение за 300 м, голосом и знаком",
+                    accent2
+                ) {
+                    NeonToggle(s.navCameraWarn, accent2) { v -> edit { it.setNavCameraWarn(v) } }
+                }
+                SettingRow(
+                    "Знак ограничения скорости",
+                    "Ограничение приходит вместе с маршрутом. Где в OSM оно не проставлено, " +
+                        "знак не показывается — оболочка не угадывает. Справочно для Беларуси: " +
+                        "60 в населённом пункте, 90 вне его, 110 на автомагистрали, 20 в жилой зоне",
+                    accent2
+                ) {
+                    NeonToggle(s.navSpeedLimitWarn, accent2) { v ->
+                        edit { it.setNavSpeedLimitWarn(v) }
+                    }
+                }
+                if (s.navSpeedLimitWarn) {
+                    SettingRow(
+                        "Порог превышения",
+                        "+${s.navSpeedTolerance} км/ч до предупреждения",
+                        accent2
+                    ) {
+                        NeonSlider(
+                            value = s.navSpeedTolerance.toFloat(),
+                            range = 0f..30f,
+                            accent = accent2,
+                            modifier = Modifier.width(220.dp)
+                        ) { v -> edit { it.setNavSpeedTolerance(v.roundToInt()) } }
+                    }
+                }
+
+                SettingRow(
+                    "Поворот карты по курсу",
+                    if (s.navRotateMap)
+                        "Карта разворачивается по направлению движения; на скорости ниже 8 км/ч " +
+                            "замирает — стоя на месте курс от GPS недостоверен"
+                    else "Север всегда сверху",
+                    accent2
+                ) {
+                    NeonToggle(s.navRotateMap, accent2) { v -> edit { it.setNavRotateMap(v) } }
+                }
+                SettingRow(
+                    "Масштаб по скорости",
+                    "Во дворе ближе, на трассе дальше. Ручной зум кнопками отключает " +
+                        "автоматический до перезапуска оболочки",
+                    accent2
+                ) {
+                    NeonToggle(s.navAutoZoom, accent2) { v -> edit { it.setNavAutoZoom(v) } }
+                }
+
+                SettingRow(
+                    "Маршруты без интернета",
+                    offlineStatus,
+                    if (offlineReady) accent2 else Neon.Amber
+                ) {
+                    NeonToggle(s.navOfflineRouting, accent2) { v ->
+                        edit { it.setNavOfflineRouting(v) }
+                    }
+                }
                 Hint(
-                    "Карту рисует сама оболочка внутри панели — тайлы OpenStreetMap, " +
-                        "ключ и аккаунт не нужны, работает на любой прошивке сразу. " +
-                        "Карту можно двигать и зумить прямо на рабочем столе; кнопка " +
-                        "«Навигатор» открывает установленное приложение на весь экран, " +
-                        "когда нужна голосовая маршрутная навигация.\n\n" +
-                        "Это единственный режим, которому нечего ломаться: показать " +
-                        "чужое приложение на части экрана Android разрешает только " +
-                        "через freeform, а он есть не на каждой прошивке.",
+                    "Офлайн-граф строится на компьютере — импорт карты Беларуси требует " +
+                        "нескольких гигабайт памяти, которых на магнитоле нет:\n" +
+                        "1) скачать belarus-latest.osm.pbf с download.geofabrik.de\n" +
+                        "2) java -Xmx4g -jar graphhopper-web-1.0.jar import belarus-latest.osm.pbf\n" +
+                        "3) папку belarus-latest-gh скопировать по USB в\n" +
+                        "   Android/data/${context.packageName}/files/graph/\n\n" +
+                        "Свои базы камер (.csv или .ov2 от радар-детекторов) кладутся рядом, в\n" +
+                        "   Android/data/${context.packageName}/files/poi/",
+                    accent2
+                )
+                Hint(
+                    "Полноценная навигация внутри оболочки, без стороннего навигатора. " +
+                        "Карта — OpenStreetMap, маршруты — открытый роутер OSRM, поиск — " +
+                        "адреса, названия мест и ближайшие заправки, кафе, парковки по " +
+                        "категориям. Ключи и аккаунты не нужны, работает на любой прошивке.\n\n" +
+                        "Чего в этом стеке нет и взять негде: пробок, камер и предупреждений. " +
+                        "Маршрут строится по графу дорог, а не по текущей обстановке, и время " +
+                        "в пути — оценка по разрешённым скоростям. Если пробки критичны, " +
+                        "кнопка справа внизу открывает установленный навигатор на весь экран.\n\n" +
+                        "Данные OSM в России полны на адреса и заметные объекты, но свежее " +
+                        "кафе или маленький магазин может отсутствовать.",
                     accent2
                 )
             }
 
-            if (s.mapMode == MapMode.FRAME) {
-                SettingRow(
-                    "Поддержка плавающих окон",
-                    freeformNote ?: if (freeform)
-                        "Прошивка сообщает о поддержке freeform — навигация откроется окном " +
-                            "ровно по границам панели карты"
-                    else "Прошивка о поддержке не сообщает. Нажмите «Включить» — оболочка " +
-                        "попробует включить freeform сама",
-                    if (freeform) accent2 else Neon.Amber
-                ) {
-                    if (freeform) {
-                        SmallButton("Готово", accent2) {}
-                    } else {
-                        SmallButton("Включить", Neon.Amber) {
-                            scope.launch {
-                                freeformNote = "Пробуем…"
-                                freeformNote = when (FreeformSetup.enable(context)) {
-                                    FreeformSetup.Result.ALREADY_ON ->
-                                        "Freeform уже включён — можно пользоваться режимом «Во фрейме»"
-                                    FreeformSetup.Result.WRITTEN_NEEDS_REBOOT ->
-                                        "Готово, настройки записаны. Перезагрузите головное " +
-                                            "устройство — freeform поднимается только при старте системы"
-                                    FreeformSetup.Result.NO_ACCESS ->
-                                        "Своими силами не вышло: нет ни разрешения, ни root. " +
-                                            "Выполните команду ниже с компьютера — она нужна один раз"
-                                }
-                            }
-                        }
-                    }
-                }
-                Hint(
-                    "Freeform — единственный системный способ показать чужое приложение на " +
-                        "части экрана. Разделить экран пополам с лаунчером нельзя: домашний " +
-                        "экран Android в split-screen не пускает.\n\n" +
-                        "Разовая команда с компьютера, после которой оболочка включает " +
-                        "freeform сама и при последующих обновлениях:\n" +
-                        FreeformSetup.adbCommand(context) + "\n\n" +
-                        "Либо напрямую, без выдачи разрешения приложению:\n" +
-                        FreeformSetup.ADB_COMMAND_DIRECT + "\n\n" +
-                        "После любого из вариантов перезагрузите головное устройство.",
-                    accent2
-                )
-            }
 
             if (s.mapMode == MapMode.OVERLAY) {
                 SettingRow(
@@ -1433,11 +1495,16 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
         }
 
         Hint(
-            "Встроить чужое окно внутрь своего Android не позволяет, а рисовать карту " +
-                "самостоятельно нельзя без ключа MapKit — подписка Плюс в Навигаторе такого " +
-                "права не даёт. Поэтому «карта во фрейме» делается двумя честными способами: " +
-                "плавающим окном по границам панели или полноэкранной картой с панелями " +
-                "оболочки поверх неё. Второй способ работает на любой прошивке.",
+            "Встроить чужое окно внутрь своего Android не позволяет, а сам Навигатор не " +
+                "отдаёт наружу ни маршрут, ни текущий манёвр — значит, нарисовать его " +
+                "ведение в чужой карте физически нечем.\n\n" +
+                "Отсюда два честных способа. «Своя карта» — оболочка рисует карту и " +
+                "ведёт по маршруту сама: поиск, манёвры, голос, сторонний навигатор не " +
+                "нужен. «Поверх карты» — полноэкранный чужой навигатор с панелями " +
+                "оболочки поверх него.\n\n" +
+                "Режим «Во фрейме» (плавающее окно навигатора по границам панели) убран: " +
+                "он требовал freeform-режима прошивки, которого на большинстве ГУ нет и " +
+                "который приложение включить не может.",
             accent2
         )
     }

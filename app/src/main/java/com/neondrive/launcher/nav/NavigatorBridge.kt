@@ -1,11 +1,8 @@
 package com.neondrive.launcher.nav
 
-import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
-import android.graphics.Rect
 import android.net.Uri
-import android.os.Build
 import android.widget.Toast
 
 data class NavApp(val packageName: String, val label: String)
@@ -13,14 +10,19 @@ data class NavApp(val packageName: String, val label: String)
 /**
  * Работа с навигационными приложениями, установленными на головном устройстве.
  *
- * Важно понимать границу возможного: подписка Плюс в Навигаторе относится к аккаунту
- * пользователя внутри того приложения и не даёт стороннему лаунчеру право рисовать
- * карту Яндекса у себя — для этого нужен ключ MapKit/NaviKit SDK. Поэтому «карта во
- * фрейме» делается двумя обходными путями, каждый из которых честно работает без ключа:
+ * Важно понимать границу возможного: Навигатор не отдаёт наружу ни геометрию
+ * маршрута, ни текущий манёвр — публичного API нет, URL-схемы односторонние.
+ * Отрисовать его ведение в своей карте поэтому нельзя ни при каких настройках.
  *
- *  • FRAME   — приложение поднимается плавающим окном ровно по границам панели
- *              (freeform-режим прошивки);
- *  • OVERLAY — приложение занимает весь экран, а панели оболочки висят поверх него.
+ * Отсюда два режима показа карты, ни один из которых не требует ключа:
+ *
+ *  • EMBEDDED — карту рисует сама оболочка (osmdroid) и сама же ведёт по маршруту.
+ *               Заводской режим: работает на любой прошивке без настройки;
+ *  • OVERLAY  — приложение занимает весь экран, а панели оболочки висят поверх него.
+ *
+ * Третий режим, «во фрейме» (плавающее окно навигатора по границам панели), был
+ * удалён: он требовал freeform-режима прошивки, которого на большинстве ГУ нет и
+ * который приложение включить не может.
  */
 object NavigatorBridge {
 
@@ -100,79 +102,6 @@ object NavigatorBridge {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         return start(context, intent)
     }
-
-    /**
-     * Поддерживает ли прошивка плавающие окна.
-     *
-     * Проверяем и системный флаг устройства, и глобальную настройку: на китайских
-     * головных устройствах freeform часто скомпилирован, но выключен.
-     */
-    fun freeformSupported(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
-        // Признак «freeform реально поднят» и признак «флаги записаны, но ГУ ещё не
-        // перезагружено» — разные вещи, и раньше они здесь были свалены в одну
-        // проверку: достаточно было записанного force_resizable_activities, чтобы
-        // функция ответила «поддерживается», хотя плавающих окон в системе ещё нет.
-        // Теперь состоянием freeform заведует FreeformSetup, который эти случаи
-        // различает и умеет их не только читать, но и чинить.
-        return FreeformSetup.active(context)
-    }
-
-    /**
-     * Запуск в окне по границам панели карты.
-     *
-     * Если прошивка freeform не поддерживает, окно откроется на весь экран —
-     * поэтому в настройках для таких устройств предлагается режим «Поверх карты».
-     */
-    fun openInFrame(context: Context, preferred: String, bounds: Rect): Boolean {
-        val pkg = resolvePackage(context, preferred) ?: return notInstalled(context)
-        val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
-
-        // Раньше сюда добавлялся ещё и FLAG_ACTIVITY_LAUNCH_ADJACENT. Это была
-        // ошибка: флаг просит систему поставить активность во ВТОРУЮ половину
-        // разделённого экрана, что прямо противоречит точным границам окна из
-        // setLaunchBounds. Когда система флаг всё же учитывала, заданные границы
-        // отбрасывались и навигатор открывался не там, где нужно. Для домашнего
-        // экрана флаг вдобавок бесполезен: система не пускает лаунчер в
-        // split-screen в принципе, значит «соседней половины» не существует.
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || bounds.isEmpty) {
-            return openFullscreen(context, preferred)
-        }
-
-        val options = ActivityOptions.makeBasic()
-        runCatching { options.setLaunchBounds(bounds) }
-        requestFreeformWindowingMode(options)
-
-        val ok = runCatching { context.startActivity(intent, options.toBundle()) }.isSuccess
-        return if (ok) true else openFullscreen(context, preferred)
-    }
-
-    /**
-     * Попросить систему открыть окно именно в режиме плавающего окна.
-     *
-     * `ActivityOptions.setLaunchBounds` задаёт границы, но саму оконную политику
-     * не меняет: если задача уходит в полноэкранный режим, границы игнорируются.
-     * `setLaunchWindowingMode(WINDOWING_MODE_FREEFORM)` снимает эту неоднозначность,
-     * но метод в AOSP помечен `@hide` — в публичном SDK его нет, вызвать можно
-     * только рефлексией, и на части прошивок вызов заблокирован ограничениями
-     * на непубличные интерфейсы.
-     *
-     * Поэтому это именно попытка, а не требование: не вышло — работаем как раньше,
-     * на одних границах. Расширение возможностей без риска: любое исключение
-     * гасится, поведение не меняется.
-     */
-    private fun requestFreeformWindowingMode(options: ActivityOptions) {
-        runCatching {
-            val method = ActivityOptions::class.java
-                .getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-            method.invoke(options, WINDOWING_MODE_FREEFORM)
-        }
-    }
-
-    /** `WindowConfiguration.WINDOWING_MODE_FREEFORM` — константа скрытого API. */
-    private const val WINDOWING_MODE_FREEFORM = 5
 
     /* ─────────────────  URL-СХЕМЫ  ───────────────── */
 

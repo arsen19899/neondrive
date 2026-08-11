@@ -97,6 +97,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repo.settings.collect { s ->
                 SteeringWheelManager.configure(applicationContext, s)
+                com.neondrive.launcher.nav.GuidanceEngine.apply {
+                    setVoiceEnabled(s.navVoice)
+                    setVoiceVolume(s.navVoiceVolume)
+                    setDuckMusic(s.navDuckMusic)
+                }
+                com.neondrive.launcher.nav.RouteHub.preferOffline = s.navOfflineRouting
+                com.neondrive.launcher.nav.HazardHub.apply {
+                    cameraWarnEnabled = s.navCameraWarn
+                    speedLimitEnabled = s.navSpeedLimitWarn
+                    toleranceKmh = s.navSpeedTolerance
+                }
                 if (s.keepScreenOn) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
@@ -137,36 +148,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         hideSystemBars()
         SpeedProvider.start(applicationContext)
-    }
-
-    /**
-     * Подстраховка от «залипшего» фрейма.
-     *
-     * Плавающее окно навигатора закрывается системными средствами, мимо оболочки,
-     * и сама она об этом никак не уведомляется. Раньше признак
-     * [com.neondrive.launcher.nav.MapFrameController.active] после такого закрытия
-     * навсегда оставался поднятым, и вторичные экраны продолжали ужиматься в узкую
-     * полосу рядом с окном, которого уже нет.
-     *
-     * Пока рядом живёт плавающее окно, наша активность работает в многооконном
-     * режиме; переход этого режима в выключенный и означает, что окна больше нет.
-     * Ловим именно переход, а не состояние в onResume: если на конкретной прошивке
-     * freeform-окно соседа вообще не переводит нас в многооконный режим, проверка
-     * состояния сбрасывала бы признак сразу после запуска карты — то есть ломала бы
-     * ровно тот случай, ради которого фрейм и нужен.
-     *
-     * Это подстраховка, а не гарантия: freeform на прошивках китайских ГУ сделан
-     * по-разному, и на части из них колбэк не придёт. Поэтому основной, всегда
-     * работающий способ свернуть фрейм — плитка «Навигация» в доке, она же тумблер.
-     */
-    override fun onMultiWindowModeChanged(
-        isInMultiWindowMode: Boolean,
-        newConfig: android.content.res.Configuration
-    ) {
-        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
-        if (!isInMultiWindowMode) {
-            com.neondrive.launcher.nav.MapFrameController.markFrameClosed()
-        }
     }
 
     /** Кнопки руля: сначала пробуем свои назначения, потом отдаём системе. */

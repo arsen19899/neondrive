@@ -45,7 +45,8 @@ data class NowPlaying(
 
 object RadioPresets {
     val default = listOf(
-        RadioStation("record", "Radio Record", "https://radiorecord.hostingradio.ru/rr96.aacp", "Dance"),
+        // Radio Record (Dance) убран: поток rr96.aacp не отвечает, станция в
+        // пресетах только мешала — пользователь жал и получал тишину.
         RadioStation("record_synth", "Record Synthwave", "https://radiorecord.hostingradio.ru/synth96.aacp", "Synthwave"),
         RadioStation("record_darkside", "Record Darkside", "https://radiorecord.hostingradio.ru/darkside96.aacp", "Chill"),
         RadioStation("energy", "Energy", "https://pub0302.101.ru:8443/stream/air/aac/64/99", "Pop"),

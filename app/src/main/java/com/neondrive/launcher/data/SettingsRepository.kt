@@ -53,6 +53,17 @@ class SettingsRepository(private val context: Context) {
         val mapMode = stringPreferencesKey("map_mode")
         val mapSide = stringPreferencesKey("map_side")
         val mapScreenPercent = intPreferencesKey("map_screen_percent")
+        val navVoice = booleanPreferencesKey("nav_voice")
+        val navVoiceVolume = intPreferencesKey("nav_voice_volume")
+        val navDuckMusic = booleanPreferencesKey("nav_duck_music")
+        val navCameraWarn = booleanPreferencesKey("nav_camera_warn")
+        val navSpeedLimitWarn = booleanPreferencesKey("nav_speed_limit_warn")
+        val navSpeedTolerance = intPreferencesKey("nav_speed_tolerance")
+        val navRotateMap = booleanPreferencesKey("nav_rotate_map")
+        val navAutoZoom = booleanPreferencesKey("nav_auto_zoom")
+        val navOfflineRouting = booleanPreferencesKey("nav_offline_routing")
+        val navFavorites = stringPreferencesKey("nav_favorites")
+        val navSearchHistory = stringPreferencesKey("nav_search_history")
         val mapAutoStart = booleanPreferencesKey("map_auto_start")
         val mapAutoStartDelay = intPreferencesKey("map_auto_start_delay")
         val homeLat = doublePreferencesKey("home_lat")
@@ -115,6 +126,17 @@ class SettingsRepository(private val context: Context) {
             mapSide = p[K.mapSide]?.let { runCatching { SidebarSide.valueOf(it) }.getOrNull() }
                 ?: d.mapSide,
             mapScreenPercent = (p[K.mapScreenPercent] ?: d.mapScreenPercent).coerceIn(30, 80),
+            navVoice = p[K.navVoice] ?: d.navVoice,
+            navVoiceVolume = (p[K.navVoiceVolume] ?: d.navVoiceVolume).coerceIn(10, 100),
+            navDuckMusic = p[K.navDuckMusic] ?: d.navDuckMusic,
+            navCameraWarn = p[K.navCameraWarn] ?: d.navCameraWarn,
+            navSpeedLimitWarn = p[K.navSpeedLimitWarn] ?: d.navSpeedLimitWarn,
+            navSpeedTolerance = (p[K.navSpeedTolerance] ?: d.navSpeedTolerance).coerceIn(0, 30),
+            navRotateMap = p[K.navRotateMap] ?: d.navRotateMap,
+            navAutoZoom = p[K.navAutoZoom] ?: d.navAutoZoom,
+            navOfflineRouting = p[K.navOfflineRouting] ?: d.navOfflineRouting,
+            navFavorites = p[K.navFavorites]?.let(::decodeFavorites) ?: d.navFavorites,
+            navSearchHistory = p[K.navSearchHistory]?.let(::decodeStringList) ?: d.navSearchHistory,
             mapAutoStart = p[K.mapAutoStart] ?: d.mapAutoStart,
             mapAutoStartDelaySec = p[K.mapAutoStartDelay] ?: d.mapAutoStartDelaySec,
             homeLat = p[K.homeLat] ?: d.homeLat,
@@ -177,6 +199,32 @@ class SettingsRepository(private val context: Context) {
     suspend fun setMapMode(v: MapMode) = put { it[K.mapMode] = v.name }
     suspend fun setMapSide(v: SidebarSide) = put { it[K.mapSide] = v.name }
     suspend fun setMapScreenPercent(v: Int) = put { it[K.mapScreenPercent] = v.coerceIn(30, 80) }
+    suspend fun setNavVoice(v: Boolean) = put { it[K.navVoice] = v }
+    suspend fun setNavVoiceVolume(v: Int) = put { it[K.navVoiceVolume] = v.coerceIn(10, 100) }
+    suspend fun setNavDuckMusic(v: Boolean) = put { it[K.navDuckMusic] = v }
+    suspend fun setNavCameraWarn(v: Boolean) = put { it[K.navCameraWarn] = v }
+    suspend fun setNavSpeedLimitWarn(v: Boolean) = put { it[K.navSpeedLimitWarn] = v }
+    suspend fun setNavSpeedTolerance(v: Int) = put { it[K.navSpeedTolerance] = v.coerceIn(0, 30) }
+    suspend fun setNavRotateMap(v: Boolean) = put { it[K.navRotateMap] = v }
+    suspend fun setNavAutoZoom(v: Boolean) = put { it[K.navAutoZoom] = v }
+    suspend fun setNavOfflineRouting(v: Boolean) = put { it[K.navOfflineRouting] = v }
+    suspend fun setNavFavorites(v: List<FavoritePlace>) = put {
+        it[K.navFavorites] = encodeFavorites(v)
+    }
+
+    /**
+     * История поиска: новый запрос уходит вверх, дубли схлопываются, длина
+     * ограничена десятью — на экране ГУ больше всё равно не пролистать за рулём.
+     */
+    suspend fun pushSearchHistory(query: String) {
+        val q = query.trim()
+        if (q.length < 3) return
+        put { prefs ->
+            val old = prefs[K.navSearchHistory]?.let(::decodeStringList) ?: emptyList()
+            val next = (listOf(q) + old.filter { !it.equals(q, ignoreCase = true) }).take(10)
+            prefs[K.navSearchHistory] = encodeStringList(next)
+        }
+    }
     suspend fun setMapAutoStart(v: Boolean) = put { it[K.mapAutoStart] = v }
     suspend fun setMapAutoStartDelay(sec: Int) = put {
         it[K.mapAutoStartDelay] = sec.coerceIn(0, 60)
@@ -260,6 +308,18 @@ class SettingsRepository(private val context: Context) {
             FmStation(frequencyKHz = freq, name = f.getOrElse(1) { "" })
         }
     }
+
+    private fun encodeFavorites(v: List<FavoritePlace>) =
+        v.joinToString("###REC###") { "${it.name.replace("###REC###", " ")}|${it.lat}|${it.lon}" }
+
+    private fun decodeFavorites(s: String): List<FavoritePlace> =
+        if (s.isBlank()) emptyList() else s.split("###REC###").mapNotNull { rec ->
+            val parts = rec.split("|")
+            if (parts.size != 3) return@mapNotNull null
+            val lat = parts[1].toDoubleOrNull() ?: return@mapNotNull null
+            val lon = parts[2].toDoubleOrNull() ?: return@mapNotNull null
+            FavoritePlace(parts[0], lat, lon)
+        }
 
     private fun encodeStringList(v: List<String>) = v.joinToString("###REC###")
 

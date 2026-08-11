@@ -6,10 +6,6 @@ import android.content.Context
 import com.neondrive.launcher.automation.AutomationService
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.FreeformSetup
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class NeonApp : Application() {
 
@@ -23,24 +19,6 @@ class NeonApp : Application() {
         PlayerHub.init(this)
         runCatching { AutomationService.start(this) }
         enableCarMode()
-        applyFreeformIfAllowed()
-    }
-
-    /**
-     * Если приложению один раз выдали `WRITE_SECURE_SETTINGS` (командой с компьютера,
-     * см. [com.neondrive.launcher.nav.FreeformSetup]), включаем freeform молча и сами —
-     * при каждом старте, чтобы настройка не потерялась после сброса или обновления
-     * прошивки. Без выданного разрешения метод не делает ничего и ничего не стоит.
-     *
-     * Это именно то, без чего навигацию нельзя показать на половине экрана:
-     * плавающее окно с заданными границами существует только при включённом freeform.
-     */
-    private fun applyFreeformIfAllowed() {
-        if (!FreeformSetup.canWriteSecureSettings(this)) return
-        if (FreeformSetup.flagsSet(this)) return
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching { FreeformSetup.enable(this@NeonApp) }
-        }
     }
 
     /**
