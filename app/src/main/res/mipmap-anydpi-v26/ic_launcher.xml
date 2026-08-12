@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Адаптивная иконка для Android 8+.
+
+     Прошивка сама решает, какой маской обрезать иконку — кругом, скруглённым
+     квадратом или каплей, — и обрезает она ВЕСЬ холст 108dp до безопасной зоны
+     примерно в 72dp по центру. Поэтому передний план нарисован с запасом: сама
+     картинка занимает 68 % холста, всё остальное прозрачное поле. Так морда
+     манула не окажется срезанной ни при какой форме маски.
+
+     Фон — сплошной цвет фона оболочки, а не часть картинки: у изображения
+     собственная тёмная рамка, и растягивать её на весь холст значило бы
+     показывать в основном рамку.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
