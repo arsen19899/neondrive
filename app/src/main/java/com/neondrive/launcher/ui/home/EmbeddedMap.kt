@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -11,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +22,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.neondrive.launcher.automation.GpsState
@@ -175,52 +179,172 @@ fun EmbeddedMap(
         }
     }
 
+    /*
+     * Куда смотрит камера. Одно место, из которого центр и масштаб применяются
+     * и по новому фиксу GPS, и после КАЖДОЙ смены размера карты.
+     *
+     * Второе здесь важнее первого. Проекция osmdroid строится от прямоугольника
+     * вьюхи (`getIntrinsicScreenRect`), и пока компоновка не прошла, этот
+     * прямоугольник пуст: `setCenter` до первой раскладки просто теряется.
+     * Именно поэтому карта после возврата из настроек, смены доли экрана под
+     * карту или поворота дисплея показывала случайный кусок мира: панель
+     * пересоздавалась, центр применялся слишком рано и больше не применялся
+     * никогда — эффект по координатам GPS не срабатывает, пока машина стоит.
+     * Помогал только зум или «К себе», то есть ручное действие уже по готовой
+     * вьюхе. Слушатель компоновки ниже закрывает это полностью.
+     */
+    val appliedZoom = remember { mutableStateOf(zoomRequest) }
+    val camera = rememberUpdatedState(
+        CameraTarget(
+            follow = follow && gps.hasFix,
+            lat = gps.lastLat,
+            lon = gps.lastLon,
+            zoom = appliedZoom.value
+        )
+    )
+
+    DisposableEffect(mapView) {
+        val listener = android.view.View.OnLayoutChangeListener {
+            _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val sizeChanged = (right - left) != (oldRight - oldLeft) ||
+                (bottom - top) != (oldBottom - oldTop)
+            if (sizeChanged) {
+                // post — чтобы компоновка успела завершиться: применять центр
+                // изнутри самой раскладки бессмысленно ровно по той же причине.
+                mapView.post { applyCamera(mapView, camera.value) }
+            }
+        }
+        mapView.addOnLayoutChangeListener(listener)
+        onDispose { mapView.removeOnLayoutChangeListener(listener) }
+    }
+
+    // Сдвиг и зум карты — чтобы метка машины оставалась на своём месте, когда
+    // карту таскают пальцем. Считать её экранные координаты можно только после
+    // того, как карта переехала, поэтому нужен сигнал от самой карты.
+    var mapTick by remember { mutableStateOf(0) }
+    DisposableEffect(mapView) {
+        val listener = object : org.osmdroid.events.MapListener {
+            override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                mapTick++
+                return false
+            }
+
+            override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                mapTick++
+                // Щипок пальцами меняет масштаб мимо наших эффектов. Запоминаем
+                // его здесь, иначе после смены размера панели карта откатилась
+                // бы к последнему масштабу, выставленному программно.
+                appliedZoom.value = mapView.zoomLevelDouble
+                return false
+            }
+        }
+        mapView.addMapListener(listener)
+        onDispose { runCatching { mapView.removeMapListener(listener) } }
+    }
+
+    // Состояние жеста живёт между вызовами update, поэтому не в лямбде.
+    val drag = remember { DragState() }
+    val touchSlop = remember(context) {
+        android.view.ViewConfiguration.get(context).scaledTouchSlop
+    }
+
     Box(modifier) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { mapView },
             update = { view ->
-                // Любое касание карты означает «смотрю сам» — следование за
-                // машиной выключается, иначе карта тут же уезжала бы обратно и
-                // подвинуть её было бы невозможно. Слушатель ничего не поглощает
-                // (false), штатная обработка жестов osmdroid работает как обычно.
-                view.setOnTouchListener { _, _ ->
-                    onUserPanned()
+                /*
+                 * «Смотрю сам» — это перетаскивание или щипок, а не любое
+                 * касание. Раньше следование выключалось на первом же ACTION_DOWN:
+                 * достаточно было случайно мазнуть по карте, и она переставала
+                 * ездить за машиной, а метка при этом ещё и исчезала. Теперь
+                 * нужен настоящий сдвиг пальца дальше системного порога или
+                 * второй палец на экране.
+                 *
+                 * Слушатель ничего не поглощает (false) — штатная обработка
+                 * жестов osmdroid работает как обычно.
+                 */
+                view.setOnTouchListener { _, ev ->
+                    when (ev.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            drag.downX = ev.x
+                            drag.downY = ev.y
+                            drag.panned = false
+                        }
+                        android.view.MotionEvent.ACTION_POINTER_DOWN -> {
+                            // Два пальца — это зум или поворот, всегда «смотрю сам».
+                            if (!drag.panned) {
+                                drag.panned = true
+                                onUserPanned()
+                            }
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            if (!drag.panned &&
+                                (kotlin.math.abs(ev.x - drag.downX) > touchSlop ||
+                                    kotlin.math.abs(ev.y - drag.downY) > touchSlop)
+                            ) {
+                                drag.panned = true
+                                onUserPanned()
+                            }
+                        }
+                    }
                     false
                 }
             }
         )
 
-        // Метка машины рисуется композом поверх карты, а не Marker'ом osmdroid:
-        // в режиме следования машина всегда в центре, позиционировать нечего, а
-        // Canvas дешевле оверлея с битмапом, который osmdroid перерисовывает на
-        // каждый сдвиг карты.
-        if (follow) {
+        /*
+         * Метка машины рисуется композом поверх карты, а не Marker'ом osmdroid:
+         * Canvas дешевле оверлея с битмапом, который osmdroid перерисовывает на
+         * каждый сдвиг карты.
+         *
+         * В режиме следования машина всегда ровно в центре — позиционировать
+         * нечего. Когда карту отвели в сторону, метка считается через проекцию:
+         * раньше она в этом случае просто пропадала с экрана, и понять, где ты
+         * находишься, было нельзя вообще — только вернуться кнопкой.
+         */
+        val car = remember(mapTick, gps.lastLat, gps.lastLon, gps.hasFix, follow) {
+            if (follow || !gps.hasFix) null else runCatching {
+                val p = mapView.projection.toPixels(GeoPoint(gps.lastLat, gps.lastLon), null)
+                // toPixels поворот карты не учитывает — его накладывают отдельно.
+                val r = mapView.projection.rotateAndScalePoint(p.x, p.y, null)
+                IntOffset(r.x, r.y)
+            }.getOrNull()
+        }
+
+        // Когда карта повёрнута по курсу, машина на ней смотрит вверх: поворот
+        // экрана уже учёл курс, и крутить ещё и стрелку значило бы повернуть её
+        // дважды. Одна формула на оба случая — ориентация карты нулевая, когда
+        // поворот выключен.
+        val arrowDeg = gps.bearingDeg + mapView.mapOrientation
+
+        if (car == null) {
+            if (follow) {
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .size(MARKER_SIZE)
+                ) { HeadingArrow(bearingDeg = arrowDeg, accent = accent) }
+            }
+        } else {
+            val half = with(LocalDensity.current) { (MARKER_SIZE / 2).roundToPx() }
             Box(
                 Modifier
-                    .align(Alignment.Center)
-                    .size(46.dp)
-            ) {
-                // Когда карта повёрнута по курсу, машина на ней всегда смотрит
-                // вверх — крутить ещё и стрелку значило бы повернуть её дважды.
-                val mapIsRotated = rotateByBearing && gps.speedKmh >= 8f
-                HeadingArrow(
-                    bearingDeg = if (mapIsRotated) 0f else gps.bearingDeg,
-                    accent = accent
-                )
-            }
+                    .offset { IntOffset(car.x - half, car.y - half) }
+                    .size(MARKER_SIZE)
+            ) { HeadingArrow(bearingDeg = arrowDeg, accent = accent) }
         }
     }
 
     // Следование за машиной. animateTo намеренно не используется: на слабом
     // процессоре ГУ анимация на каждое обновление GPS даёт рывки, а выигрыш
     // чисто косметический — точка и так приходит примерно раз в секунду.
-    LaunchedEffect(gps.lastLat, gps.lastLon, follow) {
-        if (!follow || !gps.hasFix) return@LaunchedEffect
-        runCatching { mapView.controller.setCenter(GeoPoint(gps.lastLat, gps.lastLon)) }
+    LaunchedEffect(gps.lastLat, gps.lastLon, follow, gps.hasFix) {
+        applyCamera(mapView, camera.value)
     }
 
     LaunchedEffect(zoomRequest) {
+        appliedZoom.value = zoomRequest
         runCatching { mapView.controller.setZoom(zoomRequest) }
     }
 
@@ -268,6 +392,7 @@ fun EmbeddedMap(
             gps.speedKmh < 90f -> 15.5
             else -> 14.5
         }
+        appliedZoom.value = target
         runCatching { mapView.controller.setZoom(target) }
     }
 
@@ -278,6 +403,41 @@ fun EmbeddedMap(
             runCatching { mapView.onDetach() }
         }
     }
+}
+
+/** Размер метки машины. Вынесен: по нему же считается её смещение на экране. */
+private val MARKER_SIZE = 46.dp
+
+/** Куда должна смотреть карта. */
+private data class CameraTarget(
+    val follow: Boolean,
+    val lat: Double,
+    val lon: Double,
+    val zoom: Double
+)
+
+/**
+ * Применить центр и масштаб к карте.
+ *
+ * Пока вьюха не разложена, у проекции нет размера и центр применить нельзя —
+ * поэтому вызов до первой компоновки просто откладывается: его повторит
+ * слушатель компоновки, когда размер появится.
+ */
+private fun applyCamera(view: MapView, target: CameraTarget) {
+    if (view.width == 0 || view.height == 0) return
+    runCatching {
+        view.controller.setZoom(target.zoom)
+        if (target.follow) {
+            view.controller.setCenter(GeoPoint(target.lat, target.lon))
+        }
+    }
+}
+
+/** Состояние жеста между вызовами обработчика касаний. */
+private class DragState {
+    var downX = 0f
+    var downY = 0f
+    var panned = false
 }
 
 /** Стрелка курса в центре карты. */

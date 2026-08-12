@@ -100,6 +100,8 @@ fun MapPanel(
     val repo = remember(context) { SettingsRepository(context.applicationContext) }
 
     var follow by remember { mutableStateOf(true) }
+    // Каждый жест по карте продлевает паузу в следовании — см. эффект ниже.
+    var panTick by remember { mutableStateOf(0) }
     var zoom by remember { mutableStateOf(16.0) }
     var searchOpen by remember { mutableStateOf(false) }
     var manualZoom by remember { mutableStateOf(false) }
@@ -154,6 +156,21 @@ fun MapPanel(
                 repo.clearLastDestination()
             }
         }
+    }
+
+    /*
+     * Возврат к машине сам по себе.
+     *
+     * Отвели карту в сторону — следование выключается, иначе её не подвинуть. Но
+     * оставлять его выключенным навсегда нельзя: за рулём никто не вспомнит про
+     * кнопку «К себе», а карта тем временем показывает место, которое машина уже
+     * проехала. Через двадцать секунд без единого касания камера возвращается к
+     * машине сама. Отсчёт начинается заново после каждого жеста.
+     */
+    LaunchedEffect(follow, panTick, gps.hasFix) {
+        if (follow || !gps.hasFix) return@LaunchedEffect
+        kotlinx.coroutines.delay(20_000)
+        follow = true
     }
 
     /** Запустить ведение до выбранной точки. */
@@ -219,7 +236,10 @@ fun MapPanel(
             accent = accent,
             modifier = Modifier.fillMaxSize(),
             follow = follow,
-            onUserPanned = { follow = false },
+            onUserPanned = {
+                follow = false
+                panTick++
+            },
             zoomRequest = zoom,
             route = shownRoute,
             rotateByBearing = settings.navRotateMap,
