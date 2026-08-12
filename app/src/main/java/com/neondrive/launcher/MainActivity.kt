@@ -102,7 +102,11 @@ class MainActivity : ComponentActivity() {
                     setVoiceVolume(s.navVoiceVolume)
                     setDuckMusic(s.navDuckMusic)
                 }
-                com.neondrive.launcher.nav.RouteHub.preferOffline = s.navOfflineRouting
+                com.neondrive.launcher.nav.RouteHub.apply {
+                    preferOffline = s.navOfflineRouting
+                    avoidUnpaved = s.navAvoidUnpaved
+                    avoidToll = s.navAvoidToll
+                }
                 com.neondrive.launcher.nav.HazardHub.apply {
                     cameraWarnEnabled = s.navCameraWarn
                     speedLimitEnabled = s.navSpeedLimitWarn

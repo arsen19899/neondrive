@@ -1385,6 +1385,26 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                 }
 
                 SettingRow(
+                    "Избегать грунтовых дорог",
+                    "Роутер строит два-три варианта, а оболочка смотрит по OpenStreetMap, " +
+                        "сколько в каждом грунта, и выбирает лучший. Это выбор из " +
+                        "предложенного, а не объезд любой ценой: если грунт есть во всех " +
+                        "вариантах, деваться некуда. Доля грунта подписана на плашке варианта",
+                    accent2
+                ) {
+                    NeonToggle(s.navAvoidUnpaved, accent2) { v ->
+                        edit { it.setNavAvoidUnpaved(v) }
+                    }
+                }
+                SettingRow(
+                    "Избегать платных участков",
+                    "Тем же способом — по данным OSM о платности дорог",
+                    accent2
+                ) {
+                    NeonToggle(s.navAvoidToll, accent2) { v -> edit { it.setNavAvoidToll(v) } }
+                }
+
+                SettingRow(
                     "Маршруты без интернета",
                     offlineStatus,
                     if (offlineReady) accent2 else Neon.Amber

@@ -61,6 +61,8 @@ class SettingsRepository(private val context: Context) {
         val navSpeedTolerance = intPreferencesKey("nav_speed_tolerance")
         val navRotateMap = booleanPreferencesKey("nav_rotate_map")
         val navAutoZoom = booleanPreferencesKey("nav_auto_zoom")
+        val navAvoidUnpaved = booleanPreferencesKey("nav_avoid_unpaved")
+        val navAvoidToll = booleanPreferencesKey("nav_avoid_toll")
         val navOfflineRouting = booleanPreferencesKey("nav_offline_routing")
         val navFavorites = stringPreferencesKey("nav_favorites")
         val navSearchHistory = stringPreferencesKey("nav_search_history")
@@ -134,6 +136,8 @@ class SettingsRepository(private val context: Context) {
             navSpeedTolerance = (p[K.navSpeedTolerance] ?: d.navSpeedTolerance).coerceIn(0, 30),
             navRotateMap = p[K.navRotateMap] ?: d.navRotateMap,
             navAutoZoom = p[K.navAutoZoom] ?: d.navAutoZoom,
+            navAvoidUnpaved = p[K.navAvoidUnpaved] ?: d.navAvoidUnpaved,
+            navAvoidToll = p[K.navAvoidToll] ?: d.navAvoidToll,
             navOfflineRouting = p[K.navOfflineRouting] ?: d.navOfflineRouting,
             navFavorites = p[K.navFavorites]?.let(::decodeFavorites) ?: d.navFavorites,
             navSearchHistory = p[K.navSearchHistory]?.let(::decodeStringList) ?: d.navSearchHistory,
@@ -207,6 +211,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNavSpeedTolerance(v: Int) = put { it[K.navSpeedTolerance] = v.coerceIn(0, 30) }
     suspend fun setNavRotateMap(v: Boolean) = put { it[K.navRotateMap] = v }
     suspend fun setNavAutoZoom(v: Boolean) = put { it[K.navAutoZoom] = v }
+    suspend fun setNavAvoidUnpaved(v: Boolean) = put { it[K.navAvoidUnpaved] = v }
+    suspend fun setNavAvoidToll(v: Boolean) = put { it[K.navAvoidToll] = v }
     suspend fun setNavOfflineRouting(v: Boolean) = put { it[K.navOfflineRouting] = v }
     suspend fun setNavFavorites(v: List<FavoritePlace>) = put {
         it[K.navFavorites] = encodeFavorites(v)

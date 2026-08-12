@@ -208,10 +208,6 @@ object OfflineRouter {
         return RouteOption(
             points = points,
             steps = steps,
-            // Ограничений скорости офлайн-граф в готовом виде не отдаёт: они есть
-            // в графе, но достаются через внутренние API, несовместимые между
-            // версиями. Знак ограничения в офлайне просто не показывается.
-            maxspeeds = emptyList(),
             distanceM = distance,
             durationSec = timeMs / 1000.0
         )

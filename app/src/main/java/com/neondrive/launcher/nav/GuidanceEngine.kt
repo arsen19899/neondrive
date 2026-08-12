@@ -32,6 +32,8 @@ data class GuidanceState(
     /** Остаток всего маршрута. */
     val remainingM: Double = 0.0,
     val remainingSec: Double = 0.0,
+    /** Полосы на подходе к манёвру; пусто — разметки в OSM нет. */
+    val lanes: List<RouteLane> = emptyList(),
     val offRoute: Boolean = false,
     val rerouting: Boolean = false,
     val arrived: Boolean = false
@@ -39,6 +41,21 @@ data class GuidanceState(
     val distanceLabel: String get() = formatDistance(distanceToManeuverM)
     val remainingLabel: String get() = formatDistance(remainingM)
     val etaLabel: String get() = formatDuration(remainingSec)
+
+    /**
+     * Время прибытия часами: «14:32».
+     *
+     * За рулём это полезнее, чем «через 47 минут» — с часами на приборной панели
+     * сравнивается мгновенно, а «через сколько» приходится складывать в уме.
+     * Показываем оба, но время прибытия крупнее.
+     */
+    val arrivalLabel: String
+        get() {
+            if (remainingSec <= 0) return ""
+            val at = System.currentTimeMillis() + (remainingSec * 1000).toLong()
+            return java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(at))
+        }
 }
 
 /**
@@ -184,14 +201,9 @@ object GuidanceEngine {
         val nearest = GeoMath.nearestOnRoute(route.points, lat, lon, segmentHint)
         segmentHint = nearest.segmentIndex
 
-        // Камеры и ограничение считаются от той же проекции на маршрут, что и
-        // манёвры, — отдельный сборщик GPS ради них заводить незачем.
-        HazardHub.onFix(
-            lat = lat,
-            lon = lon,
-            speedKmh = speedKmh,
-            limitKmh = route.maxspeeds.getOrNull(nearest.segmentIndex)
-        )
+        // Камеры и ограничение скорости считаются на том же фиксе GPS —
+        // отдельный сборщик ради них заводить незачем.
+        HazardHub.onFix(lat = lat, lon = lon, speedKmh = speedKmh)
 
         // Приехали?
         if (route.hasDestination) {
@@ -271,6 +283,7 @@ object GuidanceEngine {
             maneuverModifier = step.modifier,
             distanceToManeuverM = toManeuver,
             thenInstruction = steps.getOrNull(stepIndex + 1)?.instruction.orEmpty(),
+            lanes = step.lanes,
             remainingM = remaining,
             remainingSec = remainingSec,
             offRoute = false,

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -126,6 +127,16 @@ fun MapPanel(
     val guidance by GuidanceEngine.state.collectAsState()
     val hazard by HazardHub.state.collectAsState()
 
+    // Ошибку построения маршрута обязательно показываем. Раньше она молча
+    // ложилась в RouteState.error и нигде не всплывала: пользователь выбирал
+    // точку, ничего не происходило, и понять почему было невозможно.
+    LaunchedEffect(route.error) {
+        val err = route.error
+        if (!err.isNullOrBlank()) {
+            Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** Запустить ведение до выбранной точки. */
     val goTo: (Double, Double, String) -> Unit = { lat, lon, title ->
         if (gps.hasFix) {
@@ -171,14 +182,20 @@ fun MapPanel(
         // Карточка манёвра — поверх карты, по центру сверху. Появляется только
         // во время ведения и вытесняет обычную шапку панели.
         if (embedded && guidance.active && guidance.instruction.isNotBlank()) {
-            ManeuverCard(
-                guidance = guidance,
-                accent = accent,
-                accent2 = accent2,
-                modifier = Modifier
+            Column(
+                Modifier
                     .align(Alignment.TopCenter)
-                    .padding(12.dp)
-            )
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ManeuverCard(guidance = guidance, accent = accent, accent2 = accent2)
+                // Полосы показываем только когда манёвр уже близко: за километр
+                // до поворота перестраиваться рано, а плашка занимает карту.
+                if (guidance.lanes.isNotEmpty() && guidance.distanceToManeuverM < 400) {
+                    LaneGuide(lanes = guidance.lanes, accent = accent)
+                }
+            }
         }
 
         // Кнопки масштаба — вертикальной парой у правого края, как в любом
@@ -277,6 +294,14 @@ fun MapPanel(
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace
                         )
+                        if (option.warningLabel.isNotBlank()) {
+                            Spacer(Modifier.size(8.dp))
+                            Text(
+                                option.warningLabel,
+                                color = Neon.Amber,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }
@@ -578,19 +603,69 @@ private fun ManeuverCard(
         }
         Spacer(Modifier.size(16.dp))
         Column(horizontalAlignment = Alignment.End) {
+            // Время прибытия крупнее остатка: с часами на панели оно сравнивается
+            // мгновенно, а «через сколько» приходится складывать в уме.
             Text(
-                guidance.remainingLabel,
+                guidance.arrivalLabel,
                 color = accent2,
-                fontSize = 14.sp,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                guidance.etaLabel,
+                "${guidance.remainingLabel} · ${guidance.etaLabel}",
                 color = Neon.TextLow,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
             )
         }
+    }
+}
+
+/**
+ * Подсказка полос перед манёвром.
+ *
+ * Полосы, из которых манёвр выполнить нельзя, приглушены до едва заметных, а
+ * нужные подсвечены акцентом. Так решение читается за долю секунды: смотришь не
+ * на стрелки, а на то, что светится.
+ */
+@Composable
+private fun LaneGuide(
+    lanes: List<com.neondrive.launcher.nav.RouteLane>,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xE6060B14))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        lanes.forEach { lane ->
+            Icon(
+                laneIcon(lane.indications),
+                null,
+                tint = if (lane.valid) accent else Neon.TextLow.copy(alpha = 0.35f),
+                modifier = Modifier.size(if (lane.valid) 26.dp else 22.dp)
+            )
+        }
+    }
+}
+
+/** Иконка полосы по её разметке из OSM. */
+private fun laneIcon(indications: List<String>): ImageVector {
+    val i = indications.joinToString(" ")
+    return when {
+        i.contains("uturn") -> Icons.Rounded.UTurnLeft
+        i.contains("sharp left") -> Icons.Rounded.TurnSharpLeft
+        i.contains("sharp right") -> Icons.Rounded.TurnSharpRight
+        i.contains("slight left") -> Icons.Rounded.TurnSlightLeft
+        i.contains("slight right") -> Icons.Rounded.TurnSlightRight
+        i.contains("left") -> Icons.Rounded.TurnLeft
+        i.contains("right") -> Icons.Rounded.TurnRight
+        else -> Icons.Rounded.Straight
     }
 }
 

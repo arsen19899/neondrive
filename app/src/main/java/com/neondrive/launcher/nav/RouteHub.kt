@@ -17,6 +17,14 @@ import java.net.URL
 data class RoutePoint(val lat: Double, val lon: Double)
 
 /**
+ * Одна полоса на подходе к манёвру.
+ *
+ * [valid] — можно ли из неё выполнить предстоящий манёвр. Именно этим полезна
+ * подсказка полос: не «какие полосы бывают», а «в какую перестроиться сейчас».
+ */
+data class RouteLane(val indications: List<String>, val valid: Boolean)
+
+/**
  * Один манёвр маршрута.
  *
  * [distanceM] — длина участка ДО этого манёвра, как её отдаёт OSRM: то есть
@@ -31,23 +39,28 @@ data class RouteStep(
     val durationSec: Double,
     /** Тип манёвра OSRM — нужен, чтобы выбрать иконку стрелки. */
     val type: String,
-    val modifier: String
+    val modifier: String,
+    /** Разметка полос на подходе к манёвру; пусто — данных в OSM нет. */
+    val lanes: List<RouteLane> = emptyList()
 )
 
 /** Один вариант маршрута до той же точки. */
 data class RouteOption(
     val points: List<RoutePoint> = emptyList(),
     val steps: List<RouteStep> = emptyList(),
-    /**
-     * Ограничение скорости на каждом отрезке геометрии, км/ч; null — в OSM не
-     * проставлено. Длина на единицу меньше [points]: значение относится к отрезку
-     * между соседними точками.
-     */
-    val maxspeeds: List<Int?> = emptyList(),
     val distanceM: Double = 0.0,
-    val durationSec: Double = 0.0
+    val durationSec: Double = 0.0,
+    /** Покрытие и платность — заполняется отдельно, см. [SurfaceScout]. */
+    val quality: RouteQuality = RouteQuality()
 ) {
     val label: String get() = "${formatDistance(distanceM)} · ${formatDuration(durationSec)}"
+
+    /** «грунт 2,1 км» / «платно 8 км» — приписка к варианту, если есть что сказать. */
+    val warningLabel: String
+        get() = buildList {
+            if (quality.unpavedM > 200) add("грунт ${formatDistance(quality.unpavedM)}")
+            if (quality.tollM > 200) add("платно ${formatDistance(quality.tollM)}")
+        }.joinToString(" · ")
 }
 
 data class RouteState(
@@ -66,7 +79,6 @@ data class RouteState(
     private val current: RouteOption? get() = options.getOrNull(selected)
     val points: List<RoutePoint> get() = current?.points.orEmpty()
     val steps: List<RouteStep> get() = current?.steps.orEmpty()
-    val maxspeeds: List<Int?> get() = current?.maxspeeds.orEmpty()
     val distanceM: Double get() = current?.distanceM ?: 0.0
     val durationSec: Double get() = current?.durationSec ?: 0.0
 
@@ -118,11 +130,20 @@ object RouteHub {
 
     const val OSRM_BASE = "https://router.project-osrm.org"
 
+    private val OSRM_MIRRORS = listOf(
+        OSRM_BASE,
+        "https://routing.openstreetmap.de/routed-car"
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 
     /** Предпочитать локальный граф сетевому роутеру. Задаётся из настроек. */
     var preferOffline = true
+
+    /** Предпочитать вариант без грунтовок / без платных участков. Из настроек. */
+    var avoidUnpaved = false
+    var avoidToll = false
 
     private val _state = MutableStateFlow(RouteState())
     val state: StateFlow<RouteState> = _state
@@ -180,6 +201,43 @@ object RouteHub {
             if (startGuidance && context != null) {
                 GuidanceEngine.start(context)
             }
+            // Покрытие проверяем уже после того, как маршрут показан: линия должна
+            // появиться на карте немедленно, а оценка грунта — дело нескольких
+            // секунд и не повод заставлять водителя смотреть на пустой экран.
+            if ((avoidUnpaved || avoidToll) && result.options.size > 1) {
+                scoreAndPickBest(context)
+            }
+        }
+    }
+
+    /**
+     * Оценить варианты по покрытию и выбрать лучший.
+     *
+     * Роутер сам избегать грунтовок не умеет (см. [SurfaceScout] — на публичном
+     * OSRM параметр `exclude` не работает), поэтому выбираем из того, что он
+     * предложил. Если все варианты одинаково плохи, ничего не меняется — врать,
+     * что объехали, оболочка не будет.
+     */
+    private suspend fun scoreAndPickBest(context: Context?) {
+        val base = _state.value
+        val scored = base.options.map { option ->
+            option.copy(quality = withContext(Dispatchers.IO) { SurfaceScout.evaluate(option.points) })
+        }
+        if (scored.none { it.quality.known }) return
+
+        // Штраф в метрах: грунт считаем вдвое дороже платного участка — трясти
+        // машину по колее неприятнее, чем заплатить за проезд.
+        fun penalty(o: RouteOption): Double =
+            (if (avoidUnpaved) o.quality.unpavedM * 2 else 0.0) +
+                (if (avoidToll) o.quality.tollM else 0.0)
+
+        val bestIndex = scored.indices.minByOrNull { penalty(scored[it]) } ?: 0
+        val changed = bestIndex != base.selected
+        _state.value = _state.value.copy(options = scored, selected = bestIndex)
+
+        if (changed && context != null) {
+            HazardHub.loadForRoute(context, _state.value.points)
+            GuidanceEngine.restart()
         }
     }
 
@@ -222,25 +280,41 @@ object RouteHub {
     ): RouteState? = withContext(Dispatchers.IO) {
         // OSRM ждёт координаты в порядке «долгота,широта» — самая частая ошибка
         // при работе с этим API, поэтому порядок зафиксирован здесь явно.
-        // annotations=maxspeed — ограничения приходят тем же ответом, без второго
-        // запроса. alternatives=true даёт до трёх вариантов маршрута: выбор между
-        // «быстрее» и «короче» на трассе экономит больше, чем любая оптимизация UI.
-        val url = "$OSRM_BASE/route/v1/driving/" +
-            "$fromLon,$fromLat;$toLon,$toLat" +
-            "?overview=full&geometries=polyline&steps=true" +
-            "&alternatives=true&annotations=maxspeed"
+        //
+        // Здесь же когда-то стоял annotations=maxspeed — и это ломало навигацию
+        // целиком. Такого значения у OSRM нет (допустимы true/false/nodes/
+        // distance/duration/datasources/weight/speed, а maxspeed — расширение
+        // Mapbox Directions), сервер отвечал InvalidOptions, и маршрут не
+        // строился НИКОГДА. Ограничения скорости теперь берутся из Overpass,
+        // см. HazardHub.
+        //
+        // alternatives=true даёт до трёх вариантов: выбор между «быстрее» и
+        // «короче» на трассе экономит больше, чем любая доводка интерфейса.
+        val query = "/route/v1/driving/$fromLon,$fromLat;$toLon,$toLat" +
+            "?overview=full&geometries=polyline&steps=true&alternatives=true"
 
+        // Несколько зеркал: публичный демо-сервер OSRM периодически недоступен,
+        // и молчаливый отказ построить маршрут — худшее, что может случиться в
+        // дороге. Тот же приём уже используется для поиска АЗС.
+        for (base in OSRM_MIRRORS) {
+            val parsed = runCatching { fetchRoute(base + query, toLat, toLon) }.getOrNull()
+            if (parsed != null) return@withContext parsed
+        }
+        null
+    }
+
+    private fun fetchRoute(url: String, toLat: Double, toLon: Double): RouteState? {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 8000
             readTimeout = 12000
-            setRequestProperty("User-Agent", "NeonDrive/1.0 (Android head-unit launcher)")
+            setRequestProperty("User-Agent", "NeonDrive/1.4 (Android head-unit launcher)")
         }
         try {
-            if (conn.responseCode !in 200..299) return@withContext null
+            if (conn.responseCode !in 200..299) return null
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-            if (json.optString("code") != "Ok") return@withContext null
-            val routes = json.optJSONArray("routes") ?: return@withContext null
+            if (json.optString("code") != "Ok") return null
+            val routes = json.optJSONArray("routes") ?: return null
             val options = ArrayList<RouteOption>(routes.length())
             for (i in 0 until routes.length()) {
                 val route = routes.optJSONObject(i) ?: continue
@@ -249,14 +323,13 @@ object RouteHub {
                 options += RouteOption(
                     points = decodePolyline(encoded),
                     steps = parseSteps(route),
-                    maxspeeds = parseMaxspeeds(route),
                     distanceM = route.optDouble("distance", 0.0),
                     durationSec = route.optDouble("duration", 0.0)
                 )
             }
-            if (options.isEmpty()) return@withContext null
+            if (options.isEmpty()) return null
 
-            RouteState(
+            return RouteState(
                 options = options,
                 destLat = toLat,
                 destLon = toLon
@@ -264,45 +337,6 @@ object RouteHub {
         } finally {
             runCatching { conn.disconnect() }
         }
-    }
-
-    /**
-     * Ограничения скорости из `annotation.maxspeed`.
-     *
-     * OSRM отдаёт на каждый отрезок один из трёх вариантов: конкретную скорость,
-     * `unknown` (в OSM не размечено) или `none` (ограничения нет вовсе — немецкий
-     * автобан). Первый превращаем в число, остальные — в null: показывать знак
-     * там, где данных нет, нельзя, водитель поверит и получит штраф.
-     *
-     * Если сервер вообще не поддерживает эту аннотацию, список останется пустым и
-     * знак ограничения просто не появится.
-     */
-    private fun parseMaxspeeds(route: JSONObject): List<Int?> {
-        val out = ArrayList<Int?>(256)
-        val legs = route.optJSONArray("legs") ?: return out
-        for (l in 0 until legs.length()) {
-            val arr = legs.optJSONObject(l)
-                ?.optJSONObject("annotation")
-                ?.optJSONArray("maxspeed") ?: continue
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i)
-                if (o == null || o.optBoolean("unknown") || o.optBoolean("none")) {
-                    out += null
-                    continue
-                }
-                val speed = o.optDouble("speed", Double.NaN)
-                if (speed.isNaN()) {
-                    out += null
-                    continue
-                }
-                val kmh = when (o.optString("unit")) {
-                    "mph" -> speed * 1.609344
-                    else -> speed
-                }
-                out += kmh.toInt().takeIf { it in 5..200 }
-            }
-        }
-        return out
     }
 
     private fun parseSteps(route: JSONObject): List<RouteStep> {
@@ -321,6 +355,12 @@ object RouteHub {
                 val exit = man.optInt("exit", 0)
                 val name = step.optString("name").trim()
 
+                // Полосы берём из первого перекрёстка шага: у OSRM это и есть
+                // точка манёвра, и разметка в ней относится к предстоящему
+                // повороту. В остальных перекрёстках шага полосы уже про то,
+                // что будет дальше по дороге, и водителю сейчас не нужны.
+                val lanes = parseLanes(step.optJSONArray("intersections"))
+
                 out += RouteStep(
                     instruction = ManeuverText.build(type, modifier, exit, name),
                     streetName = name,
@@ -330,9 +370,26 @@ object RouteHub {
                     distanceM = step.optDouble("distance", 0.0),
                     durationSec = step.optDouble("duration", 0.0),
                     type = type,
-                    modifier = modifier
+                    modifier = modifier,
+                    lanes = lanes
                 )
             }
+        }
+        return out
+    }
+
+    private fun parseLanes(intersections: org.json.JSONArray?): List<RouteLane> {
+        val first = intersections?.optJSONObject(0) ?: return emptyList()
+        val lanes = first.optJSONArray("lanes") ?: return emptyList()
+        val out = ArrayList<RouteLane>(lanes.length())
+        for (i in 0 until lanes.length()) {
+            val l = lanes.optJSONObject(i) ?: continue
+            val ind = l.optJSONArray("indications")
+            val list = ArrayList<String>(ind?.length() ?: 0)
+            for (k in 0 until (ind?.length() ?: 0)) {
+                ind?.optString(k)?.takeIf { it.isNotBlank() }?.let(list::add)
+            }
+            out += RouteLane(indications = list, valid = l.optBoolean("valid", false))
         }
         return out
     }

@@ -207,6 +207,10 @@ data class LauncherSettings(
     val navRotateMap: Boolean = true,
     /** Менять масштаб автоматически: в городе ближе, на трассе дальше. */
     val navAutoZoom: Boolean = true,
+    /** Предпочитать вариант маршрута без грунтовых дорог. */
+    val navAvoidUnpaved: Boolean = false,
+    /** Предпочитать вариант маршрута без платных участков. */
+    val navAvoidToll: Boolean = false,
     /** Предпочитать офлайн-граф, если он загружен на устройство. */
     val navOfflineRouting: Boolean = true,
     /** Избранные точки: «имя|lat|lon». */
