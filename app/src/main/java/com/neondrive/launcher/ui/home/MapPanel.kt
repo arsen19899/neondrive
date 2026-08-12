@@ -60,6 +60,7 @@ import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.data.FavoritePlace
 import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.SettingsRepository
+import com.neondrive.launcher.nav.GeoMath
 import com.neondrive.launcher.nav.GuidanceEngine
 import com.neondrive.launcher.nav.HazardHub
 import com.neondrive.launcher.nav.NavigatorBridge
@@ -184,14 +185,43 @@ fun MapPanel(
         // подобран по самой длинной подписи ряда — «Куда» плюс «Домой» плюс зум.
         val compact = maxWidth < 420.dp
 
+        /*
+         * Что именно показывать на карте.
+         *
+         * Пока ведение идёт и машина уверенно привязана к маршруту, на карту
+         * уходит не сырой фикс GPS, а его проекция на линию маршрута и
+         * направление дороги под машиной. Сырая точка дрожит на десятки метров
+         * даже на месте — метка от этого прыгает поперёк дороги и «перескакивает»
+         * на соседние улицы; проекция едет ровно по линии, по которой мы и так
+         * едем. Курс берётся от дороги по той же причине: он не шумит.
+         *
+         * Линия маршрута обрезается по этой же проекции — позади машины остаётся
+         * только то, что ещё предстоит проехать.
+         */
+        val navGps = remember(gps, guidance.snapped, guidance.snapLat, guidance.snapLon) {
+            if (guidance.snapped && !guidance.snapLat.isNaN()) {
+                gps.copy(
+                    lastLat = guidance.snapLat,
+                    lastLon = guidance.snapLon,
+                    bearingDeg = if (gps.speedKmh >= 5f) guidance.courseDeg else gps.bearingDeg
+                )
+            } else gps
+        }
+
+        val shownRoute = remember(route.points, guidance.passedIndex, guidance.passedT) {
+            if (guidance.active && guidance.passedIndex >= 0 && route.points.size >= 2) {
+                GeoMath.routeAhead(route.points, guidance.passedIndex, guidance.passedT)
+            } else route.points
+        }
+
         EmbeddedMap(
-            gps = gps,
+            gps = navGps,
             accent = accent,
             modifier = Modifier.fillMaxSize(),
             follow = follow,
             onUserPanned = { follow = false },
             zoomRequest = zoom,
-            route = route.points,
+            route = shownRoute,
             rotateByBearing = settings.navRotateMap,
             // Ручной зум должен побеждать автоматический, иначе кнопки «+/−»
             // выглядят сломанными: нажал — и масштаб тут же уехал обратно.
@@ -202,7 +232,12 @@ fun MapPanel(
         // с ней жила шапка с названием навигатора и курсом: на узкой панели они
         // налезали друг на друга, а пользы не несли — куда ехать, говорит сама
         // карточка, а название чужого приложения к своей навигации отношения не имеет.
-        if (guidance.active && guidance.instruction.isNotBlank()) {
+        // Карточка остаётся на экране и когда подсказки нет: во время
+        // перестроения и при потере маршрута водителю важно видеть, что
+        // навигация не молчит просто так.
+        if (guidance.active &&
+            (guidance.instruction.isNotBlank() || guidance.rerouting || guidance.offRoute)
+        ) {
             Column(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -213,7 +248,6 @@ fun MapPanel(
                 ManeuverCard(
                     guidance = guidance,
                     accent = accent,
-                    accent2 = accent2,
                     compact = compact
                 )
                 // Полосы показываем только когда манёвр уже близко: за километр
@@ -508,7 +542,6 @@ private fun MapButton(
 private fun ManeuverCard(
     guidance: com.neondrive.launcher.nav.GuidanceState,
     accent: Color,
-    accent2: Color,
     compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -532,18 +565,24 @@ private fun ManeuverCard(
         Spacer(Modifier.size(if (compact) 8.dp else 12.dp))
         Column {
             Text(
-                if (guidance.rerouting) "Перестраиваю маршрут" else guidance.distanceLabel,
-                color = accent,
+                when {
+                    guidance.rerouting -> "Перестраиваю маршрут"
+                    guidance.instruction.isBlank() -> "Маршрут потерян"
+                    else -> guidance.distanceLabel
+                },
+                color = if (guidance.instruction.isBlank()) Neon.Amber else accent,
                 fontSize = if (compact) 17.sp else 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace
             )
-            Text(
-                guidance.instruction,
-                color = Neon.TextHi,
-                fontSize = if (compact) 12.sp else 14.sp,
-                maxLines = 2
-            )
+            if (guidance.instruction.isNotBlank()) {
+                Text(
+                    guidance.instruction,
+                    color = Neon.TextHi,
+                    fontSize = if (compact) 12.sp else 14.sp,
+                    maxLines = 2
+                )
+            }
             // «затем …» — первое, чем жертвуем на узкой панели: подсказка полезная,
             // но следующий манёвр важнее того, что будет после него.
             if (!compact && guidance.thenInstruction.isNotBlank()) {
@@ -555,24 +594,12 @@ private fun ManeuverCard(
                 )
             }
         }
-        Spacer(Modifier.size(if (compact) 10.dp else 16.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            // Время прибытия крупнее остатка: с часами на панели оно сравнивается
-            // мгновенно, а «через сколько» приходится складывать в уме.
-            Text(
-                guidance.arrivalLabel,
-                color = accent2,
-                fontSize = if (compact) 15.sp else 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                "${guidance.remainingLabel} · ${guidance.etaLabel}",
-                color = Neon.TextLow,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
+        // Время прибытия, остаток пути и время в пути здесь когда-то стояли
+        // отдельной колонкой справа — и это было дублирование: ровно те же три
+        // числа показывает строка маршрута внизу карты, которая никуда не
+        // прокручивается и никуда не пропадает. На карточке манёвра они только
+        // растягивали её на пол-экрана и отвлекали от единственного, ради чего
+        // она существует: куда поворачивать и через сколько метров.
     }
 }
 

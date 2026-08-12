@@ -49,9 +49,24 @@ object GeoMath {
      * через сотни метров, и расстояние до вершины показало бы «сход» там, где
      * машина едет ровно по дороге.
      *
-     * [fromIndex] позволяет не искать заново с начала маршрута: движение
-     * монотонно вперёд, и просмотр всего трека на каждый фикс GPS — лишняя работа
-     * для процессора ГУ.
+     * [fromIndex] — подсказка «мы были примерно здесь». Поиск идёт в окне вокруг
+     * неё, а не по всему треку: движение почти монотонно вперёд, и просмотр всего
+     * маршрута на каждый фикс GPS — лишняя работа для процессора ГУ.
+     *
+     * ## Почему окно, а не «от подсказки и до конца»
+     *
+     * Раньше поиск начинался ровно с [fromIndex] и шёл только вперёд. Один
+     * выброс GPS — и подсказка уезжала на десятки отрезков вперёд, вернуться
+     * назад она уже не могла НИКОГДА: реальная позиция оставалась позади окна
+     * поиска, привязка липла к случайному куску трассы, а вместе с ней уезжали и
+     * остаток пути, и текущий манёвр. Внешне это и выглядело как «навигатор
+     * потерялся»: маршрут нарисован, машина едет, а подсказки не про этот
+     * перекрёсток.
+     *
+     * Поэтому окно смотрит и немного назад ([BACK_SEGMENTS]), и ограниченно
+     * вперёд ([FWD_SEGMENTS]) — а если в окне ничего близкого не нашлось, трек
+     * пересматривается целиком. Полный проход раз в секунду по нескольким тысячам
+     * точек дешевле, чем потерянное ведение.
      */
     fun nearestOnRoute(
         points: List<RoutePoint>,
@@ -66,11 +81,41 @@ object GeoMath {
         val px = lon * lonScale
         val py = lat * latScale
 
-        var bestIndex = fromIndex.coerceIn(0, points.size - 2)
+        val hint = fromIndex.coerceIn(0, points.size - 2)
+        val from = max(0, hint - BACK_SEGMENTS)
+        val to = min(points.size - 2, hint + FWD_SEGMENTS)
+
+        val windowed = scan(points, px, py, latScale, lonScale, from, to)
+        // Привязка в окне убедительная — дальше не смотрим.
+        if (windowed.distanceM <= RESCAN_M) return windowed
+
+        // Иначе честно пересматриваем весь трек: возможно, машина вернулась на
+        // маршрут в другом месте или подсказка успела уехать.
+        val full = scan(points, px, py, latScale, lonScale, 0, points.size - 2)
+        return if (full.distanceM < windowed.distanceM) full else windowed
+    }
+
+    /** Сколько отрезков назад и вперёд от подсказки просматривать. */
+    private const val BACK_SEGMENTS = 12
+    private const val FWD_SEGMENTS = 250
+
+    /** Хуже этого расстояния до линии привязка считается неубедительной. */
+    private const val RESCAN_M = 50.0
+
+    private fun scan(
+        points: List<RoutePoint>,
+        px: Double,
+        py: Double,
+        latScale: Double,
+        lonScale: Double,
+        from: Int,
+        to: Int
+    ): Nearest {
+        var bestIndex = from
         var bestDist = Double.MAX_VALUE
         var bestT = 0.0
 
-        for (i in bestIndex until points.size - 1) {
+        for (i in from..to) {
             val ax = points[i].lon * lonScale
             val ay = points[i].lat * latScale
             val bx = points[i + 1].lon * lonScale
@@ -91,10 +136,6 @@ object GeoMath {
                 bestIndex = i
                 bestT = t
             }
-            // Дальше уходить нет смысла: если уже нашли что-то близкое, а
-            // расстояние начало расти на километр — впереди другой участок
-            // маршрута (петля, разворот), и он не наш.
-            if (bestDist < 30.0 && d > bestDist + 1000.0) break
         }
 
         return Nearest(bestIndex, bestDist, bestT)
@@ -122,6 +163,70 @@ object GeoMath {
             total += distanceM(points[k].lat, points[k].lon, points[k + 1].lat, points[k + 1].lon)
         }
         return total
+    }
+
+    /**
+     * Накопленная длина трека: `cum[i]` — сколько метров от начала маршрута до
+     * точки `i`. Считается один раз на маршрут; дальше любое «сколько проехали» и
+     * «сколько до манёвра» — это вычитание двух чисел, а не проход по списку.
+     */
+    fun cumulative(points: List<RoutePoint>): DoubleArray {
+        val cum = DoubleArray(points.size)
+        for (i in 1 until points.size) {
+            cum[i] = cum[i - 1] + distanceM(
+                points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon
+            )
+        }
+        return cum
+    }
+
+    /** Сколько метров вдоль маршрута пройдено до проекции [nearest]. */
+    fun alongOf(cum: DoubleArray, nearest: Nearest): Double {
+        if (cum.size < 2) return 0.0
+        val i = nearest.segmentIndex.coerceIn(0, cum.size - 2)
+        return cum[i] + (cum[i + 1] - cum[i]) * nearest.t
+    }
+
+    /** Сама точка проекции — куда «прилипает» машина на линии маршрута. */
+    fun pointAt(points: List<RoutePoint>, nearest: Nearest): RoutePoint {
+        if (points.size < 2) return RoutePoint(0.0, 0.0)
+        val i = nearest.segmentIndex.coerceIn(0, points.size - 2)
+        val a = points[i]
+        val b = points[i + 1]
+        return RoutePoint(
+            lat = a.lat + (b.lat - a.lat) * nearest.t,
+            lon = a.lon + (b.lon - a.lon) * nearest.t
+        )
+    }
+
+    /** Направление участка маршрута под машиной, градусы. */
+    fun bearingAt(points: List<RoutePoint>, nearest: Nearest): Double {
+        if (points.size < 2) return 0.0
+        val i = nearest.segmentIndex.coerceIn(0, points.size - 2)
+        val a = points[i]
+        val b = points[i + 1]
+        return bearingDeg(a.lat, a.lon, b.lat, b.lon)
+    }
+
+    /**
+     * Часть маршрута, которую ещё предстоит проехать: проекция машины плюс всё,
+     * что дальше по треку.
+     *
+     * Именно это рисуется на карте. Пройденный хвост не нужен — он не несёт
+     * информации, но тянется за машиной и на городском маршруте перекрывает
+     * половину экрана линией, по которой уже проехали.
+     */
+    fun routeAhead(points: List<RoutePoint>, segmentIndex: Int, t: Double): List<RoutePoint> =
+        routeAhead(points, Nearest(segmentIndex, 0.0, t))
+
+    fun routeAhead(points: List<RoutePoint>, nearest: Nearest): List<RoutePoint> {
+        if (points.size < 2) return points
+        val i = nearest.segmentIndex.coerceIn(0, points.size - 2)
+        val head = pointAt(points, nearest)
+        val out = ArrayList<RoutePoint>(points.size - i)
+        out.add(head)
+        for (k in i + 1 until points.size) out.add(points[k])
+        return out
     }
 
     /** Разница азимутов со знаком, −180..180. */

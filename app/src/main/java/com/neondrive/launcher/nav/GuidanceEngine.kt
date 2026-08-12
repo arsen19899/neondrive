@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.automation.SpeedProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +37,25 @@ data class GuidanceState(
     val lanes: List<RouteLane> = emptyList(),
     val offRoute: Boolean = false,
     val rerouting: Boolean = false,
-    val arrived: Boolean = false
+    val arrived: Boolean = false,
+    /**
+     * Позиция машины, «прилипшая» к линии маршрута, и направление участка под ней.
+     *
+     * Сырой фикс GPS на ГУ дрожит на десятки метров даже стоя на месте, и метка
+     * машины прыгает по соседним точкам. Пока привязка к маршруту убедительна,
+     * показывать честнее не сырую точку, а её проекцию на дорогу, по которой мы
+     * едем: она движется вдоль линии и не скачет поперёк неё.
+     */
+    val snapped: Boolean = false,
+    val snapLat: Double = Double.NaN,
+    val snapLon: Double = Double.NaN,
+    val courseDeg: Float = 0f,
+    /**
+     * Где машина находится на треке: индекс отрезка и доля внутри него. По этой
+     * паре карта отрезает уже пройденный кусок линии маршрута.
+     */
+    val passedIndex: Int = -1,
+    val passedT: Double = 0.0
 ) {
     val distanceLabel: String get() = formatDistance(distanceToManeuverM)
     val remainingLabel: String get() = formatDistance(remainingM)
@@ -63,11 +82,21 @@ data class GuidanceState(
  *
  * ## Как это работает
  *
- * Раз в фикс GPS позиция проецируется на линию маршрута ([GeoMath.nearestOnRoute]).
- * От проекции считается остаток пути и расстояние до ближайшего впереди манёвра;
- * когда манёвр пройден — берётся следующий. Если проекция ушла от линии дальше
- * порога и держится там несколько фиксов подряд, маршрут перестраивается от
- * текущей точки.
+ * Раз в фикс GPS позиция проецируется на линию маршрута ([GeoMath.nearestOnRoute])
+ * и переводится в одно число — сколько метров пройдено ВДОЛЬ трека. На этой же
+ * шкале заранее размечены все манёвры, поэтому «какой манёвр следующий» и
+ * «сколько до него» — это вычитание, а не поиск: текущим считается первый манёвр,
+ * который мы ещё не обогнали по треку.
+ *
+ * Так сделано не из любви к экономии. Пока расстояние до манёвра мерилось по
+ * прямой, поперечная ошибка GPS решала, засчитается поворот или нет: при сносе
+ * больше порога машина не «доезжала» до точки манёвра никогда, счётчик манёвров
+ * залипал на давно пройденном шаге, и оболочка продолжала уверенно советовать
+ * ехать прямо там, где нужно было поворачивать. Обогнать же манёвр вдоль
+ * маршрута, не выполнив его, невозможно.
+ *
+ * Если проекция ушла от линии дальше порога и держится там несколько фиксов
+ * подряд, маршрут перестраивается от текущей точки.
  *
  * ## Почему пороги именно такие
  *
@@ -92,11 +121,36 @@ object GuidanceEngine {
     private const val OFF_ROUTE_M = 60.0
     private const val OFF_ROUTE_FIXES = 3
 
-    /** Манёвр считается пройденным, когда до него меньше этого. */
-    private const val MANEUVER_PASSED_M = 25.0
+    /**
+     * Манёвр считается пройденным, когда мы обогнали его ВДОЛЬ маршрута на
+     * столько метров.
+     *
+     * Раньше здесь стояло 25 м по прямой от машины до точки манёвра — и это была
+     * причина «навигатор потерялся». Прямая не знает про дорогу: если улица
+     * проходит в двадцати метрах от перекрёстка, на котором нужно повернуть
+     * (а с ошибкой GPS в городе это обычное дело), поворот засчитывался
+     * пройденным ещё на подъезде к нему. Карточка переключалась на следующий шаг
+     * — как правило, «продолжайте движение N метров» — и водитель проезжал
+     * поворот мимо, ничего не заподозрив. Ровно тот случай из теста.
+     *
+     * Теперь и позиция, и точки манёвров меряются пройденным расстоянием по
+     * самому треку. Обогнать манёвр вдоль маршрута, не выполнив его,
+     * невозможно, а поперечная ошибка GPS на это число уже не влияет.
+     */
+    private const val MANEUVER_PASSED_M = 12.0
 
     /** Приехали. */
     private const val ARRIVED_M = 40.0
+
+    /**
+     * Фиксы хуже этой точности не участвуют в решении «съехали с маршрута».
+     * Под мостом и в тоннеле ГУ отдаёт точку с точностью в сотню метров — по
+     * такой точке перестраивать маршрут нельзя.
+     */
+    private const val TRUST_ACCURACY_M = 40f
+
+    /** Пока привязка к треку не хуже — метка машины показывается на линии. */
+    private const val SNAP_M = 30.0
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
@@ -121,6 +175,54 @@ object GuidanceEngine {
     private var spokenFar = false
     private var spokenNear = false
     private var spokenNow = false
+
+    /**
+     * Предпосчитанная геометрия текущего маршрута.
+     *
+     * Ведение опирается на расстояние ВДОЛЬ трека, а не по прямой, — значит нужны
+     * накопленные длины и положение каждого манёвра на этой шкале. Считать их на
+     * каждый фикс GPS нельзя: маршрут через город — это тысячи точек. Считаем
+     * один раз на маршрут и держим здесь, привязав к самому объекту списка точек:
+     * пришёл новый маршрут (перестроение, другой вариант) — кэш пересобирается сам.
+     */
+    private class RouteGeometry(val points: List<RoutePoint>, steps: List<RouteStep>) {
+        val cum: DoubleArray = GeoMath.cumulative(points)
+        val totalM: Double = cum.lastOrNull() ?: 0.0
+
+        /** Положение каждого манёвра на шкале «метров от начала маршрута». */
+        val stepAlong: DoubleArray = DoubleArray(steps.size).also { out ->
+            var hint = 0
+            for (j in steps.indices) {
+                val s = steps[j]
+                val n = GeoMath.nearestOnRoute(points, s.maneuverLat, s.maneuverLon, hint)
+                hint = n.segmentIndex
+                // Манёвры на треке идут по порядку. Если проекция выдала шаг
+                // назад (петля, развязка, две близкие точки), выправляем: иначе
+                // «до манёвра» ушло бы в минус и шаг пропустился бы.
+                out[j] = maxOf(GeoMath.alongOf(cum, n), if (j > 0) out[j - 1] else 0.0)
+            }
+            // Последний манёвр — прибытие: он ровно в конце трека.
+            if (out.isNotEmpty()) out[out.size - 1] = maxOf(out[out.size - 1], totalM)
+        }
+    }
+
+    private var geometry: RouteGeometry? = null
+
+    private fun geometryFor(route: RouteState): RouteGeometry? {
+        if (!route.hasRoute) return null
+        val cached = geometry
+        // Сравнение по ссылке намеренно: RouteHub отдаёт тот же список точек,
+        // пока маршрут не сменился, а поэлементное сравнение тысяч координат на
+        // каждый фикс — ровно та работа, которой мы избегаем.
+        if (cached != null && cached.points === route.points) return cached
+        val built = RouteGeometry(route.points, route.steps)
+        geometry = built
+        // Новый маршрут — счётчики манёвров начинаются заново.
+        stepIndex = 0
+        segmentHint = 0
+        resetSpoken()
+        return built
+    }
 
     fun setVoiceEnabled(on: Boolean) {
         voiceEnabled = on
@@ -152,13 +254,14 @@ object GuidanceEngine {
         stepIndex = 0
         segmentHint = 0
         offRouteCount = 0
+        geometry = null
         resetSpoken()
         _state.value = GuidanceState(active = true)
 
         job = scope.launch {
             SpeedProvider.state.collect { gps ->
                 if (!gps.hasFix) return@collect
-                onFix(app, gps.lastLat, gps.lastLon, gps.speedKmh)
+                onFix(app, gps)
             }
         }
     }
@@ -179,6 +282,7 @@ object GuidanceEngine {
     fun stop() {
         job?.cancel()
         job = null
+        geometry = null
         runCatching { tts?.stop() }
         abandonFocus()
         _state.value = GuidanceState()
@@ -194,9 +298,35 @@ object GuidanceEngine {
 
     /* ─────────────────  ОСНОВНОЙ ЦИКЛ  ───────────────── */
 
-    private fun onFix(context: Context, lat: Double, lon: Double, speedKmh: Float) {
+    private fun onFix(context: Context, gps: GpsState) {
+        val lat = gps.lastLat
+        val lon = gps.lastLon
+        val speedKmh = gps.speedKmh
+
         val route = RouteHub.state.value
-        if (!route.hasRoute) return
+
+        // Маршрута нет, а ведение включено — значит его сейчас пересчитывают
+        // (или пересчёт не удался). Молчать в этот момент нельзя: именно так
+        // выглядит «навигатор потерялся» — карточка застывает на старой
+        // подсказке и продолжает уверенно врать. Честно говорим, что происходит.
+        if (!route.hasRoute) {
+            geometry = null
+            _state.value = _state.value.copy(
+                // Текст статуса рисует сама карточка по флагам ниже — здесь
+                // подсказки нет, и оставлять старую было бы враньём.
+                instruction = "",
+                thenInstruction = "",
+                distanceToManeuverM = 0.0,
+                lanes = emptyList(),
+                rerouting = route.loading,
+                offRoute = !route.loading,
+                snapped = false,
+                passedIndex = -1
+            )
+            return
+        }
+
+        val geo = geometryFor(route) ?: return
 
         val nearest = GeoMath.nearestOnRoute(route.points, lat, lon, segmentHint)
         segmentHint = nearest.segmentIndex
@@ -231,8 +361,17 @@ object GuidanceEngine {
             }
         }
 
-        // Сход с маршрута
+        // Сход с маршрута.
+        //
+        // Точность фикса здесь решает: под мостом, в тоннеле и в дворовых
+        // «колодцах» ГУ отдаёт точку с разбросом в сотню метров. Перестраивать
+        // маршрут по такой точке — верный способ увести водителя в сторону,
+        // поэтому недостоверные фиксы просто не голосуют за сход.
+        val trusted = gps.accuracyM <= 0f || gps.accuracyM <= TRUST_ACCURACY_M
         if (nearest.distanceM > OFF_ROUTE_M) {
+            // Заведомо мусорный фикс не меняет вообще ничего: карточка остаётся
+            // в том виде, в каком была на последней достоверной точке.
+            if (!trusted) return
             offRouteCount++
             if (offRouteCount >= OFF_ROUTE_FIXES && !_state.value.rerouting) {
                 _state.value = _state.value.copy(offRoute = true, rerouting = true)
@@ -253,29 +392,57 @@ object GuidanceEngine {
         }
         offRouteCount = 0
 
+        // Сколько проехали по треку — единая шкала и для остатка пути, и для
+        // расстояния до манёвра.
+        val progress = GeoMath.alongOf(geo.cum, nearest)
+        val remaining = (geo.totalM - progress).coerceAtLeast(0.0)
+
+        // Привязка машины к линии и направление дороги под ней — для карты.
+        val snap = nearest.distanceM <= SNAP_M
+        val snapPoint = if (snap) GeoMath.pointAt(route.points, nearest) else null
+        val course = if (snap) GeoMath.bearingAt(route.points, nearest).toFloat() else gps.bearingDeg
+
         // Ближайший манёвр впереди
         val steps = route.steps
         if (steps.isEmpty()) {
             _state.value = _state.value.copy(
                 active = true,
-                remainingM = GeoMath.remainingAlong(route.points, nearest)
+                remainingM = remaining,
+                snapped = snap,
+                snapLat = snapPoint?.lat ?: Double.NaN,
+                snapLon = snapPoint?.lon ?: Double.NaN,
+                courseDeg = course,
+                passedIndex = nearest.segmentIndex,
+                passedT = nearest.t
             )
             return
         }
 
-        if (stepIndex >= steps.size) stepIndex = steps.size - 1
-        var step = steps[stepIndex]
-        var toManeuver = GeoMath.distanceM(lat, lon, step.maneuverLat, step.maneuverLon)
+        /*
+         * Какой манёвр показывать.
+         *
+         * Первый по треку манёвр, который мы ещё не обогнали. Ключевое слово —
+         * «по треку»: индекс не хранится между фиксами и не может ни залипнуть,
+         * ни перескочить. Прошлая версия вела счётчик вручную, двигая его по
+         * прямому расстоянию до точки манёвра, и после единственной ошибки —
+         * будь то выброс GPS или поворот, до которого дорога подходит слишком
+         * близко, — этот счётчик уже никогда не возвращался на место.
+         *
+         * Здесь же после перестроения, промаха или отката назад позиция
+         * пересчитывается сама: манёвр всегда соответствует тому месту трека,
+         * где машина находится прямо сейчас.
+         */
+        val idx = steps.indices.firstOrNull {
+            geo.stepAlong.getOrElse(it) { Double.MAX_VALUE } > progress + MANEUVER_PASSED_M
+        } ?: (steps.size - 1)
 
-        // Манёвр пройден — переходим к следующему
-        while (toManeuver < MANEUVER_PASSED_M && stepIndex < steps.size - 1) {
-            stepIndex++
+        if (idx != stepIndex) {
+            stepIndex = idx
             resetSpoken()
-            step = steps[stepIndex]
-            toManeuver = GeoMath.distanceM(lat, lon, step.maneuverLat, step.maneuverLon)
         }
-
-        val remaining = GeoMath.remainingAlong(route.points, nearest)
+        val step = steps[stepIndex]
+        val toManeuver =
+            (geo.stepAlong.getOrElse(stepIndex) { progress } - progress).coerceAtLeast(0.0)
         // Оценка оставшегося времени по средней скорости маршрута: точнее, чем
         // делить на текущую скорость (на светофоре она ноль и ETA уходит в
         // бесконечность), и честнее, чем показывать исходную оценку до конца.
@@ -295,7 +462,13 @@ object GuidanceEngine {
             remainingSec = remainingSec,
             offRoute = false,
             rerouting = false,
-            arrived = false
+            arrived = false,
+            snapped = snap,
+            snapLat = snapPoint?.lat ?: Double.NaN,
+            snapLon = snapPoint?.lon ?: Double.NaN,
+            courseDeg = course,
+            passedIndex = nearest.segmentIndex,
+            passedT = nearest.t
         )
 
         announce(step, toManeuver, speedKmh)

@@ -89,7 +89,14 @@ fun EmbeddedMap(
     follow: Boolean = true,
     onUserPanned: () -> Unit = {},
     zoomRequest: Double = 16.0,
-    /** Линия маршрута, посчитанная [com.neondrive.launcher.nav.RouteHub]. */
+    /**
+     * Линия маршрута, посчитанная [com.neondrive.launcher.nav.RouteHub].
+     *
+     * Сюда приходит уже обрезанный маршрут — только то, что осталось проехать.
+     * Пройденный хвост панель отсекает по привязке машины к треку (см.
+     * [com.neondrive.launcher.nav.GeoMath.routeAhead]): линия укорачивается за
+     * машиной по мере движения и не тянется через полэкрана туда, где мы уже были.
+     */
     route: List<RoutePoint> = emptyList(),
     /** Поворачивать карту по курсу движения вместо «север сверху». */
     rotateByBearing: Boolean = true,

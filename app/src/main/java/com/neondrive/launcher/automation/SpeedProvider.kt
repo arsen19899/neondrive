@@ -25,14 +25,46 @@ data class GpsState(
 )
 
 /**
- * Скорость по GPS. Сглаживание экспоненциальное — стрелка не должна дёргаться
- * на каждом «плохом» отсчёте, но и отставать больше секунды тоже нельзя.
+ * Скорость и позиция по GPS.
+ *
+ * ## Почему здесь фильтр, а не просто «что пришло, то и показываем»
+ *
+ * Слушатель подписан сразу на два провайдера: спутниковый и сетевой. Сетевой
+ * нужен — часть ГУ отдаёт скорость только через него, а в начале поездки он
+ * даёт первую точку раньше спутников. Но точность у него сотни метров, и когда
+ * оба провайдера работают одновременно, точки от них приходят вперемешку:
+ * спутниковая, сетевая, спутниковая… Метка машины при этом прыгает между
+ * реальным положением и вышкой сотовой связи — то самое «прыгает на соседние
+ * точки». Поэтому пока спутники живы, сетевые точки игнорируются целиком.
+ *
+ * Отдельно отбрасываются «телепорты»: смещение, которое невозможно проехать за
+ * прошедшее время. Такое приходит после тоннеля, при холодном старте и просто
+ * от плохого приёма между домами. Подряд их отбрасывается не больше нескольких —
+ * иначе после настоящего перемещения (машину везли на эвакуаторе, ГУ было
+ * выключено) фильтр залип бы навсегда.
+ *
+ * Сглаживание скорости экспоненциальное — стрелка не должна дёргаться на каждом
+ * «плохом» отсчёте, но и отставать больше секунды тоже нельзя.
  */
 object SpeedProvider : LocationListener {
 
     private const val ALPHA = 0.35f
     private const val MIN_TIME_MS = 500L
     private const val MIN_DIST_M = 0f
+
+    /** Сколько после спутниковой точки не слушаем сетевую. */
+    private const val NETWORK_HOLDOFF_MS = 20_000L
+
+    /** Точность хуже этой — точка почти наверняка от вышки, а не от спутников. */
+    private const val JUNK_ACCURACY_M = 120f
+
+    /** Быстрее этого (м/с ≈ 360 км/ч) машина не ездит — значит это выброс. */
+    private const val TELEPORT_SPEED_MS = 100.0
+    private const val TELEPORT_MIN_M = 120f
+    private const val MAX_REJECTS = 4
+
+    /** Ниже этой скорости курс от GPS недостоверен — держим прежний. */
+    private const val BEARING_MIN_KMH = 5f
 
     private val _state = MutableStateFlow(GpsState())
     val state: StateFlow<GpsState> = _state
@@ -41,6 +73,8 @@ object SpeedProvider : LocationListener {
     private var lastLocation: Location? = null
     private var smoothed = 0f
     private var started = false
+    private var lastGpsFixMs = 0L
+    private var rejectedInRow = 0
 
     fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -74,10 +108,14 @@ object SpeedProvider : LocationListener {
         started = false
         smoothed = 0f
         lastLocation = null
+        lastGpsFixMs = 0L
+        rejectedInRow = 0
         _state.value = _state.value.copy(speedKmh = 0f, hasFix = false)
     }
 
     override fun onLocationChanged(location: Location) {
+        if (!accept(location)) return
+
         // Скорость из фикса, а если её нет — считаем по смещению
         val raw = if (location.hasSpeed()) {
             location.speed
@@ -95,16 +133,56 @@ object SpeedProvider : LocationListener {
         // Ниже 2 км/ч GPS обычно шумит — показываем ноль
         val shown = if (smoothed < 2f) 0f else smoothed
 
+        // Курс на месте — случайное число: стоящая машина «вертится» на карте, а
+        // вместе с ней и вся повёрнутая по курсу карта. Ниже порога держим тот
+        // курс, с которым машина остановилась.
+        val bearing = if (location.hasBearing() && shown >= BEARING_MIN_KMH) {
+            location.bearing
+        } else {
+            _state.value.bearingDeg
+        }
+
         _state.value = _state.value.copy(
             speedKmh = shown,
             hasFix = true,
             accuracyM = location.accuracy,
             altitudeM = location.altitude,
-            bearingDeg = location.bearing,
+            bearingDeg = bearing,
             lastLat = location.latitude,
             lastLon = location.longitude,
             satellites = location.extras?.getInt("satellites", 0) ?: _state.value.satellites
         )
+    }
+
+    /**
+     * Годится ли фикс к показу. Отсекает чужой провайдер, мусорную точность и
+     * телепорты — см. описание класса.
+     */
+    private fun accept(location: Location): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val isGps = location.provider == LocationManager.GPS_PROVIDER
+
+        if (isGps) {
+            lastGpsFixMs = now
+        } else if (now - lastGpsFixMs < NETWORK_HOLDOFF_MS) {
+            return false
+        }
+
+        if (_state.value.hasFix &&
+            location.hasAccuracy() && location.accuracy > JUNK_ACCURACY_M
+        ) return false
+
+        val prev = lastLocation
+        if (prev != null && rejectedInRow < MAX_REJECTS) {
+            val dt = ((location.time - prev.time) / 1000.0).coerceAtLeast(0.5)
+            val d = location.distanceTo(prev)
+            if (d > TELEPORT_MIN_M && d / dt > TELEPORT_SPEED_MS) {
+                rejectedInRow++
+                return false
+            }
+        }
+        rejectedInRow = 0
+        return true
     }
 
     @Deprecated("Требуется на старых ГУ (API < 29)")
