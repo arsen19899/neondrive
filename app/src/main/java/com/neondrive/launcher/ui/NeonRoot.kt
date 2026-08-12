@@ -34,7 +34,7 @@ import com.neondrive.launcher.data.LauncherSettings
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.SettingsRepository
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.MapFrameController
+import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.ui.apps.AllAppsScreen
 import com.neondrive.launcher.ui.common.LocalCompactUi
 import com.neondrive.launcher.ui.eq.EqualizerScreen
@@ -81,12 +81,6 @@ fun NeonRoot(
     // Библиотека подтягивается один раз при запуске оболочки
     LaunchedEffect(Unit) {
         runCatching { PlayerHub.refreshLibrary() }
-    }
-
-    // Автозапуск навигации. В режиме своей карты не делает ничего — карта уже
-    // на рабочем столе; см. MapFrameController.autoStartIfNeeded.
-    LaunchedEffect(settings.mapAutoStart, settings.mapMode, settings.mapPackage) {
-        runCatching { MapFrameController.autoStartIfNeeded(context, settings) }
     }
 
     NeonBackdrop(
@@ -146,9 +140,13 @@ fun NeonRoot(
                                 },
                                 onOpenLibrary = { screen = NeonScreen.MUSIC },
                                 onPhone = { screen = NeonScreen.PHONE },
-                                // Тумблер, а не просто «запустить»: повторное
-                                // нажатие убирает панели поверх навигатора.
-                                onNavigation = { MapFrameController.toggle(context, settings) },
+                                // Карта и так на рабочем столе, поэтому плитка
+                                // «Навигация» открывает сторонний навигатор —
+                                // единственное, ради чего он ещё может понадобиться
+                                // (пробки). Если его нет, покажется тост.
+                                onNavigation = {
+                                    NavigatorBridge.openFullscreen(context, settings.mapPackage)
+                                },
                                 onEqualizer = { screen = NeonScreen.EQUALIZER },
                                 onAndroidSettings = {
                                     runCatching {

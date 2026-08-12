@@ -23,13 +23,10 @@ import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.ui.NeonScreen
 import com.neondrive.launcher.ui.common.DockButton
 import com.neondrive.launcher.ui.theme.neonPanel
@@ -58,11 +55,6 @@ fun SideDock(
     modifier: Modifier = Modifier,
     horizontal: Boolean = false
 ) {
-    // Плитка «Навигация» — тумблер: подсвечиваем её по состоянию поднятых поверх
-    // навигатора панелей, а не по текущему экрану. Так сразу видно, считает ли
-    // оболочка карту поднятой, и понятно, что повторное нажатие её свернёт.
-    val navFrameActive by MapFrameController.active.collectAsState()
-
     if (horizontal) {
         // Высота — не фиксированная: ClockCard рисует три строки текста (время,
         // дата, день недели), и на некоторых плотностях/масштабах шрифта системы
@@ -98,7 +90,7 @@ fun SideDock(
                 DockButton(Icons.Rounded.Phone, "Телефон", false, accent, onClick = onPhone)
                 DockButton(
                     Icons.Rounded.Navigation, "Навигация",
-                    navFrameActive, accent, onClick = onNavigation
+                    false, accent, onClick = onNavigation
                 )
                 DockButton(
                     Icons.Rounded.Equalizer, "Эквалайзер",
@@ -146,7 +138,7 @@ fun SideDock(
             DockButton(Icons.Rounded.Phone, "Телефон", false, accent, onClick = onPhone)
             DockButton(
                 Icons.Rounded.Navigation, "Навигация",
-                navFrameActive, accent, onClick = onNavigation
+                false, accent, onClick = onNavigation
             )
             DockButton(
                 Icons.Rounded.Equalizer, "Эквалайзер",

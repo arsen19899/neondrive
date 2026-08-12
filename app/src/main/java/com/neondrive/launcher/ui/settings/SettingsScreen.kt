@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import com.neondrive.launcher.automation.NeonNotificationListener
 import com.neondrive.launcher.automation.SpeedProvider
 import com.neondrive.launcher.data.LauncherSettings
-import com.neondrive.launcher.data.MapMode
 import com.neondrive.launcher.data.MusicSource
 import com.neondrive.launcher.data.NotificationReaction
 import com.neondrive.launcher.data.SettingsRepository
@@ -64,10 +63,8 @@ import com.neondrive.launcher.input.SteeringWheelManager
 import com.neondrive.launcher.media.FmRadioController
 import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
-import com.neondrive.launcher.nav.MapFrameController
 import com.neondrive.launcher.nav.NavigatorBridge
 import com.neondrive.launcher.nav.OfflineRouter
-import com.neondrive.launcher.overlay.NeonOverlayService
 import com.neondrive.launcher.phone.BluetoothDevicesRepository
 import com.neondrive.launcher.phone.PairedBtDevice
 import com.neondrive.launcher.system.DefaultLauncherHelper
@@ -1197,12 +1194,10 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     val context = LocalContext.current
     val gps by SpeedProvider.state.collectAsState()
     val apps = remember { NavigatorBridge.installedNavApps(context) }
-    val canOverlay = NeonOverlayService.canDraw(context)
     // Статус офлайн-графа читается один раз за открытие экрана: проверка лезет на
     // флеш-память ГУ и в первый раз может занять секунды.
     val offlineReady = remember { OfflineRouter.isReady(context) }
     val offlineStatus = remember { OfflineRouter.status(context) }
-    val frameActive by MapFrameController.active.collectAsState()
 
 
     Column {
@@ -1279,21 +1274,8 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
             )
         }
 
-        SettingsSection("Режим карты", accent2) {
-            SettingRow(
-                "Режим показа",
-                s.mapMode.hint,
-                accent2
-            ) {
-                NeonSegmented(
-                    options = MapMode.entries.toList(),
-                    selected = s.mapMode,
-                    label = { it.label },
-                    accent = accent2
-                ) { v -> edit { it.setMapMode(v) } }
-            }
-
-            if (s.mapMode == MapMode.EMBEDDED) {
+        SettingsSection("Навигация", accent2) {
+            run {
                 SettingRow(
                     "Голосовое ведение",
                     if (s.navVoice)
@@ -1440,57 +1422,6 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
             }
 
 
-            if (s.mapMode == MapMode.OVERLAY) {
-                SettingRow(
-                    "Разрешение «Поверх других приложений»",
-                    if (canOverlay) "Выдано — панели лягут поверх карты"
-                    else "Не выдано, без него режим не запустится",
-                    if (canOverlay) accent2 else Neon.Amber
-                ) {
-                    SmallButton(
-                        if (canOverlay) "Выдано" else "Выдать",
-                        if (canOverlay) accent2 else Neon.Amber
-                    ) {
-                        if (!canOverlay) NeonOverlayService.requestPermission(context)
-                    }
-                }
-            }
-
-            SettingRow(
-                "Запускать навигацию автоматически",
-                "Сразу после старта оболочки карта поднимается сама — не нужно ничего нажимать",
-                accent2
-            ) {
-                NeonToggle(s.mapAutoStart, accent2) { v -> edit { it.setMapAutoStart(v) } }
-            }
-            if (s.mapAutoStart) {
-                SettingRow(
-                    "Задержка автозапуска",
-                    "${s.mapAutoStartDelaySec} с — чтобы система и GPS успели подняться",
-                    accent2
-                ) {
-                    NeonSlider(
-                        value = s.mapAutoStartDelaySec.toFloat(),
-                        range = 0f..30f,
-                        accent = accent2,
-                        modifier = Modifier.width(220.dp)
-                    ) { v -> edit { it.setMapAutoStartDelay(v.roundToInt()) } }
-                }
-            }
-            SettingRow(
-                if (frameActive) "Фрейм развёрнут" else "Проверить сейчас",
-                if (frameActive)
-                    "Оболочка считает карту поднятой и ужимает экраны в свободную полосу. " +
-                        "Свернуть можно здесь или плиткой «Навигация» в доке"
-                else "Поднять карту в выбранном режиме",
-                if (frameActive) accent2 else accent
-            ) {
-                if (frameActive) {
-                    SmallButton("Свернуть", Neon.Amber) { MapFrameController.stop(context) }
-                } else {
-                    SmallButton("Запустить", accent) { MapFrameController.launch(context, s) }
-                }
-            }
         }
 
         SettingsSection("Точка «Дом»", accent) {
@@ -1515,16 +1446,14 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
         }
 
         Hint(
-            "Встроить чужое окно внутрь своего Android не позволяет, а сам Навигатор не " +
-                "отдаёт наружу ни маршрут, ни текущий манёвр — значит, нарисовать его " +
-                "ведение в чужой карте физически нечем.\n\n" +
-                "Отсюда два честных способа. «Своя карта» — оболочка рисует карту и " +
-                "ведёт по маршруту сама: поиск, манёвры, голос, сторонний навигатор не " +
-                "нужен. «Поверх карты» — полноэкранный чужой навигатор с панелями " +
-                "оболочки поверх него.\n\n" +
-                "Режим «Во фрейме» (плавающее окно навигатора по границам панели) убран: " +
-                "он требовал freeform-режима прошивки, которого на большинстве ГУ нет и " +
-                "который приложение включить не может.",
+            "Навигация целиком своя: карта OpenStreetMap, маршруты OSRM, поиск по " +
+                "адресам и категориям, манёвры, полосы и голос. Сторонний навигатор не " +
+                "нужен — плитка «Навигация» в доке открывает его только если он " +
+                "установлен и вам зачем-то понадобились пробки.\n\n" +
+                "Режим «Поверх карты» убран: он поднимал чужой навигатор на весь экран и " +
+                "клал панели оболочки поверх него отдельными окнами. Это требовало " +
+                "разрешения «Поверх других приложений», дублировало половину интерфейса " +
+                "и всё равно проигрывало своей карте.",
             accent2
         )
     }
@@ -1598,16 +1527,6 @@ private fun SystemTab(s: LauncherSettings, accent: Color, accent2: Color, edit: 
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     }
-                }
-            }
-            SettingRow(
-                "Поверх других приложений",
-                if (NeonOverlayService.canDraw(context)) "Выдано"
-                else "Нужно для режима «Поверх карты»",
-                accent2
-            ) {
-                SmallButton("Открыть", accent2) {
-                    NeonOverlayService.requestPermission(context)
                 }
             }
             SettingRow("Разрешения приложения", "Геолокация, музыка, телефон, контакты", accent2) {

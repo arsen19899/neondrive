@@ -269,10 +269,10 @@ fun PlayerPanel(
  * Плеер для узкой колонки — когда под навигацию отдано две трети экрана и больше.
  *
  * Принцип другой, чем в основной раскладке: ничего не делит строку по горизонтали.
- * Обложка занимает всю ширину карточкой, под ней название во всю ширину в две
- * строки, ещё ниже транспорт. В таком порядке даже в 200 dp всё читается, тогда
- * как ужимание горизонтальной раскладки давало обрезанные подписи и кнопки,
- * в которые невозможно попасть на ходу.
+ * Обложки здесь нет вовсе — в узкой колонке она съедала половину высоты, а
+ * пользы не приносила: на ходу разглядывать картинку некогда, важно название
+ * трека. Вместо неё название во всю ширину, под ним полоса воспроизведения и
+ * транспорт столбиком.
  *
  * Подписи источников тоже короткие: «С устройства» и «Яндекс.Музыка» в треть
  * колонки не помещаются ни при каком кегле.
@@ -328,43 +328,13 @@ private fun CompactPlayerBody(
 
         Spacer(Modifier.height(10.dp))
 
-        // Обложка во всю ширину колонки: на узкой панели это единственное место,
-        // где она вообще имеет смысл — сбоку от текста она съедала бы половину
-        // строки и не давала прочитать ни название, ни исполнителя.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(96.dp)
-                .neonGlow(accent2, 14.dp, if (now.isPlaying) 0.30f else 0.10f, 10.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFF0C1424))
-                .border(1.dp, accent2.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                .clickable { onOpenLibrary() },
-            contentAlignment = Alignment.Center
-        ) {
-            if (now.artUri != null) {
-                AsyncImage(
-                    model = now.artUri,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().height(96.dp)
-                )
-            } else {
-                Icon(
-                    Icons.Rounded.LibraryMusic, null,
-                    tint = accent2.copy(alpha = 0.55f),
-                    modifier = Modifier.size(34.dp)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
         HudLabel(
             if (connecting) "Подключение…" else now.sourceLabel.ifBlank { source.label },
             accent2
         )
         Spacer(Modifier.height(3.dp))
+        // Библиотека открывается по названию: обложки, на которой это висело
+        // раньше, больше нет, а какая-то точка входа нужна.
         Text(
             now.title,
             color = Neon.TextHi,
@@ -372,7 +342,8 @@ private fun CompactPlayerBody(
             fontWeight = FontWeight.SemiBold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            lineHeight = 17.sp
+            lineHeight = 17.sp,
+            modifier = Modifier.clickable(onClick = onOpenLibrary)
         )
         Text(
             now.subtitle,
@@ -395,25 +366,34 @@ private fun CompactPlayerBody(
 
         Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
 
-        Row(
+        // Транспорт столбиком, а не строкой. В узкой колонке три круглые кнопки
+        // в ряд либо не помещаются, либо ужимаются до размера, в который на ходу
+        // не попасть. По вертикали места хватает всегда — колонка приборов
+        // высокая, — поэтому кнопки остаются крупными и разнесёнными.
+        Column(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            RoundBtn(Icons.Rounded.SkipPrevious, accent2, 40.dp, onClick = onPrev)
             RoundBtn(
                 if (now.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                accent2, 52.dp, filled = true, onClick = onPlayPause
+                accent2, 54.dp, filled = true, onClick = onPlayPause
             )
-            RoundBtn(Icons.Rounded.SkipNext, accent2, 40.dp, onClick = onNext)
-            if (canLike) {
-                RoundBtn(
-                    if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    if (liked == true) Neon.Magenta else Neon.TextMid,
-                    40.dp,
-                    filled = liked == true,
-                    onClick = onLike
-                )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RoundBtn(Icons.Rounded.SkipPrevious, accent2, 42.dp, onClick = onPrev)
+                RoundBtn(Icons.Rounded.SkipNext, accent2, 42.dp, onClick = onNext)
+                if (canLike) {
+                    RoundBtn(
+                        if (liked == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        if (liked == true) Neon.Magenta else Neon.TextMid,
+                        42.dp,
+                        filled = liked == true,
+                        onClick = onLike
+                    )
+                }
             }
         }
     }

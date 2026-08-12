@@ -115,6 +115,15 @@ fun EmbeddedMap(
             setVerticalMapRepetitionEnabled(false)
             setMinZoomLevel(3.0)
             setMaxZoomLevel(19.0)
+
+            // MapView — обычный ViewGroup, и Android рисует ему полосы прокрутки:
+            // у правого края карты появлялась чёрная вертикальная полоса во всю
+            // высоту панели. Для карты, которую и так таскают пальцем, скроллбары
+            // бессмысленны — выключаем оба.
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            isScrollbarFadingEnabled = false
+            overScrollMode = android.view.View.OVER_SCROLL_NEVER
         }
     }
 

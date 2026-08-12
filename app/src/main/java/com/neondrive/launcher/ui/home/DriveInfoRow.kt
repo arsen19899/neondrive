@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,8 +42,13 @@ import com.neondrive.launcher.ui.theme.Neon
 import kotlin.math.roundToInt
 
 /**
- * Строка приборов: расстояние до ближайшей заправки слева, компактный спидометр
- * по центру, погода в точке следования справа.
+ * Приборы: спидометр отдельной строкой, под ним заправка и погода.
+ *
+ * Раньше все три виджета стояли в один ряд. На узкой колонке — а она узкая всегда,
+ * когда под навигацию отдана половина экрана и больше — каждому доставалась треть
+ * от трети, и вместо «3,0 км» и «+12°» оставались огрызки «3» и «-|». Спидометр
+ * самый важный и самый широкий, поэтому ему отдана вся строка целиком, а заправка
+ * с погодой делят вторую: их значения короткие и в половину строки помещаются.
  *
  * Два требования, которые раньше нарушались:
  *  1. У каждого виджета непрозрачный тёмный фон, а не только рамка — на рабочем
@@ -66,21 +72,24 @@ fun DriveInfoRow(
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        // Пороги подобраны по ширине одного виджета (строка делится на 3 части
-        // неравными весами 1 / 1.15 / 1), а не всей строки — так решение не
-        // зависит от того, встроена ли строка в узкую боковую колонку рабочего
-        // стола или в широкую панель поверх карты.
-        val perWidgetWidth = maxWidth / 3.15f
-        val compact = perWidgetWidth < 100.dp
-        val tiny = perWidgetWidth < 78.dp
+        // Пороги считаем по ширине виджета нижней строки — она делится пополам,
+        // и именно ей тесно. Спидометру во всю ширину плохо не бывает.
+        val perWidgetWidth = maxWidth / 2.1f
+        val compact = perWidgetWidth < 110.dp
+        val tiny = perWidgetWidth < 85.dp
 
-        Row(
+        Column(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FuelWidget(fuel, accent2, compact, tiny, Modifier.weight(1f))
-            SpeedoPanel(gps, units, accent, compact, tiny, Modifier.weight(1.15f))
-            WeatherWidget(weather, accent2, compact, tiny, Modifier.weight(1f))
+            SpeedoPanel(gps, units, accent, compact, tiny, Modifier.fillMaxWidth())
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FuelWidget(fuel, accent2, compact, tiny, Modifier.weight(1f))
+                WeatherWidget(weather, accent2, compact, tiny, Modifier.weight(1f))
+            }
         }
     }
 }
