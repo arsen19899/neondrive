@@ -63,6 +63,7 @@ class SettingsRepository(private val context: Context) {
         val navAvoidUnpaved = booleanPreferencesKey("nav_avoid_unpaved")
         val navAvoidToll = booleanPreferencesKey("nav_avoid_toll")
         val navOfflineRouting = booleanPreferencesKey("nav_offline_routing")
+        val navOfflineMap = booleanPreferencesKey("nav_offline_map")
         val navFavorites = stringPreferencesKey("nav_favorites")
         val navSearchHistory = stringPreferencesKey("nav_search_history")
         val lastDestLat = doublePreferencesKey("last_dest_lat")
@@ -137,6 +138,7 @@ class SettingsRepository(private val context: Context) {
             navAvoidUnpaved = p[K.navAvoidUnpaved] ?: d.navAvoidUnpaved,
             navAvoidToll = p[K.navAvoidToll] ?: d.navAvoidToll,
             navOfflineRouting = p[K.navOfflineRouting] ?: d.navOfflineRouting,
+            navOfflineMap = p[K.navOfflineMap] ?: d.navOfflineMap,
             navFavorites = p[K.navFavorites]?.let(::decodeFavorites) ?: d.navFavorites,
             navSearchHistory = p[K.navSearchHistory]?.let(::decodeStringList) ?: d.navSearchHistory,
             lastDestLat = p[K.lastDestLat] ?: d.lastDestLat,
@@ -212,6 +214,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNavAvoidUnpaved(v: Boolean) = put { it[K.navAvoidUnpaved] = v }
     suspend fun setNavAvoidToll(v: Boolean) = put { it[K.navAvoidToll] = v }
     suspend fun setNavOfflineRouting(v: Boolean) = put { it[K.navOfflineRouting] = v }
+    suspend fun setNavOfflineMap(v: Boolean) = put { it[K.navOfflineMap] = v }
     /** Запомнить активный маршрут, чтобы пережить перезапуск оболочки. */
     suspend fun setLastDestination(lat: Double, lon: Double, title: String) = put {
         it[K.lastDestLat] = lat

@@ -64,6 +64,7 @@ import com.neondrive.launcher.media.FmRadioController
 import com.neondrive.launcher.media.FmStation
 import com.neondrive.launcher.media.PlayerHub
 import com.neondrive.launcher.nav.NavigatorBridge
+import com.neondrive.launcher.nav.OfflineMap
 import com.neondrive.launcher.nav.OfflineRouter
 import com.neondrive.launcher.phone.BluetoothDevicesRepository
 import com.neondrive.launcher.phone.PairedBtDevice
@@ -1198,6 +1199,8 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     // флеш-память ГУ и в первый раз может занять секунды.
     val offlineReady = remember { OfflineRouter.isReady(context) }
     val offlineStatus = remember { OfflineRouter.status(context) }
+    val offlineMapReady = remember { OfflineMap.isPresent(context) }
+    val offlineMapStatus = remember { OfflineMap.status(context) }
 
 
     Column {
@@ -1395,6 +1398,32 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                         edit { it.setNavOfflineRouting(v) }
                     }
                 }
+
+                SettingRow(
+                    "Карта без интернета",
+                    offlineMapStatus,
+                    if (offlineMapReady) accent2 else Neon.Amber
+                ) {
+                    NeonToggle(s.navOfflineMap, accent2) { v ->
+                        edit { it.setNavOfflineMap(v) }
+                    }
+                }
+                Hint(
+                    "Вся Беларусь — один файл на 304 МБ:\n" +
+                        "1) скачать https://download.mapsforge.org/maps/v5/europe/belarus.map\n" +
+                        "2) скопировать по USB в\n" +
+                        "   Android/data/${context.packageName}/files/map/\n" +
+                        "3) включить переключатель выше\n\n" +
+                        "Растровыми тайлами то же самое заняло бы около 60 ГБ: карта здесь не " +
+                        "хранится картинками, а рисуется на устройстве из геометрии дорог — " +
+                        "поэтому в одном файле сразу все масштабы. Соседние страны кладутся " +
+                        "рядом и показываются как одна карта.\n\n" +
+                        "Плата за это — рисование нагружает процессор ГУ сильнее готовых " +
+                        "тайлов. Нарисованное складывается в кэш, так что знакомые улицы " +
+                        "появляются мгновенно, а вот первый проезд по новому району будет " +
+                        "чуть медленнее сетевой карты.",
+                    accent2
+                )
                 Hint(
                     "Офлайн-граф строится на компьютере — импорт карты Беларуси требует " +
                         "нескольких гигабайт памяти, которых на магнитоле нет:\n" +

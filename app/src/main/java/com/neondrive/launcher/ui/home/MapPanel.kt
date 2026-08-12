@@ -245,7 +245,8 @@ fun MapPanel(
             rotateByBearing = settings.navRotateMap,
             // Ручной зум должен побеждать автоматический, иначе кнопки «+/−»
             // выглядят сломанными: нажал — и масштаб тут же уехал обратно.
-            autoZoom = settings.navAutoZoom && !manualZoom
+            autoZoom = settings.navAutoZoom && !manualZoom,
+            offlineMap = settings.navOfflineMap
         )
 
         // Карточка манёвра — единственное, что занимает верх карты. Раньше рядом

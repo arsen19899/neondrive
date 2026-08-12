@@ -153,6 +153,15 @@ data class LauncherSettings(
     val navAvoidToll: Boolean = false,
     /** Предпочитать офлайн-граф, если он загружен на устройство. */
     val navOfflineRouting: Boolean = true,
+    /**
+     * Рисовать карту из офлайн-файла вместо тайлов из сети.
+     *
+     * По умолчанию выключено, даже если файл на устройстве есть: рисование
+     * векторной карты нагружает процессор ГУ сильнее готовых картинок, и выбор
+     * между скоростью отрисовки и независимостью от сети должен оставаться за
+     * водителем. См. [com.neondrive.launcher.nav.OfflineMap].
+     */
+    val navOfflineMap: Boolean = false,
     /** Избранные точки: «имя|lat|lon». */
     val navFavorites: List<FavoritePlace> = emptyList(),
     /** История поиска, последние запросы. */

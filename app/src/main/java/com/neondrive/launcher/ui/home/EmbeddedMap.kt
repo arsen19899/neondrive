@@ -28,7 +28,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.neondrive.launcher.automation.GpsState
 import com.neondrive.launcher.nav.GeoMath
+import com.neondrive.launcher.nav.OfflineMap
 import com.neondrive.launcher.nav.RoutePoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -105,17 +108,50 @@ fun EmbeddedMap(
     /** Поворачивать карту по курсу движения вместо «север сверху». */
     rotateByBearing: Boolean = true,
     /** Подстраивать масштаб под скорость. */
-    autoZoom: Boolean = true
+    autoZoom: Boolean = true,
+    /** Рисовать карту из офлайн-файла вместо тайлов из сети. */
+    offlineMap: Boolean = false
 ) {
     val context = LocalContext.current
 
-    // MapView создаётся один раз и живёт в remember, а не заводится внутри
-    // factory с записью в state: так нет ни лишней рекомпозиции, ни nullable-
-    // состояния, и эффекты ниже всегда имеют дело с готовым объектом.
-    val mapView = remember {
+    /*
+     * Офлайн-карта.
+     *
+     * Открытие — это чтение заголовков файла на триста мегабайт с флеш-памяти
+     * ГУ, поэтому оно уходит в фоновый поток, а карта создаётся уже вокруг
+     * готового поставщика тайлов. Пока файл открывается (или если его нет),
+     * работают обычные сетевые тайлы — переключение происходит само, без
+     * пустого экрана в промежутке.
+     */
+    var offline by remember { mutableStateOf<OfflineMap.Handle?>(null) }
+    LaunchedEffect(offlineMap) {
+        if (!offlineMap) {
+            offline = null
+            return@LaunchedEffect
+        }
+        val opened = withContext(Dispatchers.IO) { OfflineMap.open(context) }
+        offline = opened
+    }
+
+    // Освобождать открытый файл и поток темы оформления обязательно: иначе
+    // каждое переключение настройки оставляло бы за собой ещё одну открытую
+    // карту. `current` захватывается специально — в onDispose нужно прежнее
+    // значение, а не то, что уже пришло ему на смену.
+    val current = offline
+    DisposableEffect(current) {
+        onDispose { runCatching { current?.dispose() } }
+    }
+
+    // MapView пересоздаётся вместе со сменой источника тайлов: поставщик
+    // задаётся конструктором и живёт ровно столько же, сколько сама карта.
+    // Камеру после пересоздания вернёт на место слушатель компоновки ниже.
+    val mapView = remember(offline) {
         configureOsmdroid(context)
-        MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+        val view = offline?.let { MapView(context, it.provider) } ?: MapView(context)
+        view.apply {
+            // Источник тайлов трогаем только у сетевой карты: у офлайновой он
+            // уже задан поставщиком, и Mapnik бы его затёр.
+            if (offline == null) setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             // Свои кнопки зума не нужны — в панели карты есть чипы «+/−»,
             // а системные оверлеи osmdroid смотрятся чужеродно.
@@ -149,7 +185,10 @@ fun EmbeddedMap(
         }
     }
 
-    LaunchedEffect(route, accent) {
+    // mapView в ключах не для красоты: карта пересоздаётся при переключении на
+    // офлайн-файл, а оверлей маршрута переживает пересоздание — без этого ключа
+    // линия осталась бы в списке оверлеев старой, уже выброшенной карты.
+    LaunchedEffect(route, accent, mapView) {
         runCatching {
             routeOverlay.outlinePaint.color = accent.toArgb()
             if (route.isEmpty()) {
@@ -170,7 +209,7 @@ fun EmbeddedMap(
 
     // Ночная инверсия тайлов: дневной OSM в тёмном салоне слепит, а инверсия
     // делает из него почти чёрную карту, попадающую в неоновую палитру оболочки.
-    LaunchedEffect(nightTiles) {
+    LaunchedEffect(nightTiles, mapView) {
         runCatching {
             mapView.overlayManager.tilesOverlay.setColorFilter(
                 if (nightTiles) TilesOverlay.INVERT_COLORS else null
