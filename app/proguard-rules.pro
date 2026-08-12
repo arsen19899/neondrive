@@ -1,3 +1,0 @@
--keep class com.neondrive.launcher.** { *; }
--dontwarn androidx.media3.**
--keepattributes *Annotation*
