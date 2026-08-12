@@ -394,9 +394,33 @@ object PlayerHub {
                 )
                 return@launch
             }
+
+            // Телефон в машине важнее локального приложения.
+            //
+            // Если по Bluetooth подключён телефон и он уже что-то играет — играем
+            // с него: там аккаунт пользователя, его офлайн-кэш и «продолжить
+            // прослушивание», а звук всё равно идёт через магнитолу. Управление
+            // уходит по AVRCP через медиасессию вендорского BT-приложения, тем же
+            // пультом, что рулит и локальными плеерами.
+            //
+            // Разбудить Яндекс.Музыку НА ТЕЛЕФОНЕ оболочка не может — с чужого
+            // устройства по AVRCP можно только нажать «play» тому, кто уже держит
+            // сессию. Поэтому если телефон подключён, но молчит, честнее запустить
+            // локальное приложение, чем делать вид, что мы им управляем.
+            if (bluetoothPhoneConnected() && external.attachBluetooth()) {
+                _now.value = external.now.value
+                if (autoPlay && !external.now.value.isPlaying) external.play()
+                return@launch
+            }
+            external.preferBluetooth = false
+
             _connectingYandex.value = true
             try {
-                val connected = if (launchApp) external.connect() else {
+                // allowVisibleLaunch = false: вкладка плеера не имеет права
+                // перекрыть рабочий стол чужим окном даже на мгновение.
+                val connected = if (launchApp) {
+                    external.connect(allowVisibleLaunch = false)
+                } else {
                     external.refresh(); external.available.value
                 }
                 if (connected) {
@@ -412,9 +436,13 @@ object PlayerHub {
                         external.play()
                     }
                 } else {
+                    // Приложение не удалось разбудить в фоне, а открывать его
+                    // поверх рабочего стола мы не будем. Один раз запустить его
+                    // руками придётся — дальше оно останется в памяти, и
+                    // переключения пойдут бесшумно.
                     _now.value = _now.value.copy(
-                        title = "Яндекс.Музыка не отвечает",
-                        subtitle = "Откройте приложение и включите любой трек"
+                        title = "Откройте Яндекс.Музыку один раз",
+                        subtitle = "Дальше переключение будет работать в фоне"
                     )
                 }
             } finally {
@@ -426,6 +454,25 @@ object PlayerHub {
     fun openYandexMusic() {
         external.launchApp()
     }
+
+    /**
+     * Подключён ли к магнитоле телефон по Bluetooth.
+     *
+     * Проверяем A2DP (звук) и HFP (гарнитура): на разных прошивках телефон
+     * рапортует о себе то одним профилем, то другим, а нам достаточно любого —
+     * вопрос лишь в том, есть ли вообще подключённое устройство.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun bluetoothPhoneConnected(): Boolean = runCatching {
+        val manager = appContext.getSystemService(Context.BLUETOOTH_SERVICE)
+            as? android.bluetooth.BluetoothManager
+        val adapter = manager?.adapter ?: return false
+        if (!adapter.isEnabled) return false
+        adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) ==
+            android.bluetooth.BluetoothProfile.STATE_CONNECTED ||
+            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) ==
+            android.bluetooth.BluetoothProfile.STATE_CONNECTED
+    }.getOrDefault(false)
 
     /** Вернуть фокус оболочке поверх только что открывшегося стороннего плеера. */
     private fun returnToLauncher() {

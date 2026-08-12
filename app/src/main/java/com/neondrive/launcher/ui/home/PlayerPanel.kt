@@ -74,23 +74,24 @@ fun PlayerPanel(
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onVolume: (Boolean) -> Unit,
-    onOpenLibrary: () -> Unit
+    onOpenLibrary: () -> Unit,
+    /**
+     * Требовать компактную раскладку независимо от измеренной ширины.
+     *
+     * Ставится, когда под карту отдано две трети экрана и больше: именно там
+     * колонка приборов становится узкой. Судить по одной измеренной ширине
+     * нельзя — на 7" ГУ и половина экрана даёт ту же ширину, что две трети на
+     * 10", а перестраивать плеер там, где он и так помещался, не нужно.
+     */
+    preferCompact: Boolean = false
 ) {
     NeonCard(modifier = modifier, accent = accent2) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // Панель живёт в колонке произвольной ширины — от компактных ГУ 7"
-            // до широких приборных экранов.
-            //
-            // Ниже 270 dp горизонтальная раскладка перестаёт работать в принципе:
-            // обложка и текст делят и без того узкую строку, название трека
-            // ужимается до трёх букв с многоточием, а три вкладки источника с
-            // подписями «С устройства» и «Яндекс.Музыка» превращаются в кашу.
-            // Такая ширина получается, когда под навигацию отдана большая доля
-            // экрана (две трети и выше) — то есть в самом востребованном режиме.
-            // Поэтому там рисуется отдельная вертикальная раскладка, где каждому
-            // элементу достаётся вся ширина колонки. Всё, что шире, рисуется ровно
-            // как раньше.
-            if (maxWidth < 270.dp) {
+            // Компактная раскладка включается либо по явному требованию (карта
+            // занимает две трети экрана), либо когда колонка физически слишком
+            // узкая даже для маленького ГУ. Во всех остальных случаях плеер
+            // рисуется ровно так, как рисовался всегда.
+            if (preferCompact || maxWidth < 250.dp) {
                 CompactPlayerBody(
                     now = now, source = source, accent2 = accent2,
                     liked = liked, canLike = canLike, connecting = connecting,
@@ -294,15 +295,18 @@ private fun CompactPlayerBody(
 ) {
     Column(Modifier.fillMaxWidth()) {
 
-        Row(
+        // Источники столбиком, а не в ряд. В треть ширины три вкладки не влезают
+        // ни при каком кегле — оставались «Фа…», «Ра…», «Я…». По вертикали место
+        // есть, и подписи помещаются целиком, без сокращений.
+        Column(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             MusicSource.entries.forEach { s ->
                 val sel = s == source
                 Box(
                     Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .clip(RoundedCornerShape(9.dp))
                         .background(if (sel) accent2.copy(alpha = 0.20f) else Color(0x330C1424))
                         .border(
@@ -311,12 +315,12 @@ private fun CompactPlayerBody(
                             RoundedCornerShape(9.dp)
                         )
                         .clickable { onSource(s) }
-                        .padding(vertical = 7.dp),
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        shortSourceLabel(s),
-                        fontSize = 11.sp,
+                        s.label,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = if (sel) accent2 else Neon.TextLow,
@@ -399,12 +403,6 @@ private fun CompactPlayerBody(
     }
 }
 
-/** Короткие подписи источников — длинные в треть узкой колонки не помещаются. */
-private fun shortSourceLabel(source: MusicSource): String = when (source) {
-    MusicSource.DEVICE -> "Файлы"
-    MusicSource.RADIO -> "Радио"
-    MusicSource.YANDEX -> "Я.Музыка"
-}
 
 @Composable
 private fun RoundBtn(

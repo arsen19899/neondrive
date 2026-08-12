@@ -220,6 +220,13 @@ object GuidanceEngine {
                 )
                 job?.cancel()
                 job = null
+                // Маршрут после прибытия больше не нужен, но убирать его мгновенно
+                // нельзя: водитель должен успеть увидеть «вы приехали». Полминуты —
+                // достаточно, чтобы прочитать, и мало, чтобы забыть сбросить самому.
+                scope.launch {
+                    kotlinx.coroutines.delay(30_000)
+                    if (_state.value.arrived) RouteHub.clear()
+                }
                 return
             }
         }

@@ -126,7 +126,10 @@ fun HomeScreen(
                 onNext = onNext,
                 onPrev = onPrev,
                 onVolume = onVolume,
-                onOpenLibrary = onOpenLibrary
+                onOpenLibrary = onOpenLibrary,
+                // Две трети экрана под карту — колонка приборов становится узкой,
+                // и плеер перестраивается в вертикальную раскладку.
+                preferCompact = settings.mapScreenPercent >= 60
             )
         }
 

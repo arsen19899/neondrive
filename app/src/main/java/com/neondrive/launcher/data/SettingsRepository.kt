@@ -65,6 +65,9 @@ class SettingsRepository(private val context: Context) {
         val navOfflineRouting = booleanPreferencesKey("nav_offline_routing")
         val navFavorites = stringPreferencesKey("nav_favorites")
         val navSearchHistory = stringPreferencesKey("nav_search_history")
+        val lastDestLat = doublePreferencesKey("last_dest_lat")
+        val lastDestLon = doublePreferencesKey("last_dest_lon")
+        val lastDestTitle = stringPreferencesKey("last_dest_title")
         val homeLat = doublePreferencesKey("home_lat")
         val homeLon = doublePreferencesKey("home_lon")
 
@@ -136,6 +139,9 @@ class SettingsRepository(private val context: Context) {
             navOfflineRouting = p[K.navOfflineRouting] ?: d.navOfflineRouting,
             navFavorites = p[K.navFavorites]?.let(::decodeFavorites) ?: d.navFavorites,
             navSearchHistory = p[K.navSearchHistory]?.let(::decodeStringList) ?: d.navSearchHistory,
+            lastDestLat = p[K.lastDestLat] ?: d.lastDestLat,
+            lastDestLon = p[K.lastDestLon] ?: d.lastDestLon,
+            lastDestTitle = p[K.lastDestTitle] ?: d.lastDestTitle,
             homeLat = p[K.homeLat] ?: d.homeLat,
             homeLon = p[K.homeLon] ?: d.homeLon,
 
@@ -206,6 +212,19 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNavAvoidUnpaved(v: Boolean) = put { it[K.navAvoidUnpaved] = v }
     suspend fun setNavAvoidToll(v: Boolean) = put { it[K.navAvoidToll] = v }
     suspend fun setNavOfflineRouting(v: Boolean) = put { it[K.navOfflineRouting] = v }
+    /** Запомнить активный маршрут, чтобы пережить перезапуск оболочки. */
+    suspend fun setLastDestination(lat: Double, lon: Double, title: String) = put {
+        it[K.lastDestLat] = lat
+        it[K.lastDestLon] = lon
+        it[K.lastDestTitle] = title
+    }
+
+    suspend fun clearLastDestination() = put {
+        it.remove(K.lastDestLat)
+        it.remove(K.lastDestLon)
+        it.remove(K.lastDestTitle)
+    }
+
     suspend fun setNavFavorites(v: List<FavoritePlace>) = put {
         it[K.navFavorites] = encodeFavorites(v)
     }

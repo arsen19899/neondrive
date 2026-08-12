@@ -58,7 +58,35 @@ class ExternalSessionBridge(private val context: Context) {
         private val DISLIKE_HINTS = listOf(
             "dislike", "unlike", "дизлайк", "не нрав", "thumbdown", "thumb_down"
         )
+
+        /**
+         * Пакеты штатных Bluetooth-приложений головных устройств.
+         *
+         * Сам A2DP-приём звука — дело прошивки, стороннее приложение к нему не
+         * подключится. Но пока телефон играет по Bluetooth, вендорское BT-приложение
+         * почти всегда публикует MediaSession: в неё приходят название трека и
+         * исполнитель по профилю AVRCP, а транспортные команды из неё уходят обратно
+         * на телефон. Значит, тем же пультом, что рулит Яндекс.Музыкой, можно рулить
+         * и музыкой с телефона — включая ту же Яндекс.Музыку, но запущенную на нём.
+         *
+         * Список тот же, что у реакции на уведомления: производители переиспользуют
+         * одни и те же пакеты BT-стека из поколения в поколение.
+         */
+        val BLUETOOTH_PACKAGES = NeonNotificationListener.PAIRED_DEVICE_PACKAGES
+
+        fun isBluetoothPackage(pkg: String): Boolean =
+            pkg in BLUETOOTH_PACKAGES || pkg.contains(".bt") || pkg.contains("bluetooth")
     }
+
+    /**
+     * Искать сначала Bluetooth-сессию, а уже потом локальные плееры.
+     *
+     * Включается, когда к магнитоле подключён телефон: играть с него и правильнее
+     * (там аккаунт, офлайн-кэш, продолжение прослушивания), и это то, чего ждёт
+     * водитель, воткнувший телефон в машину.
+     */
+    @Volatile
+    var preferBluetooth: Boolean = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val manager: MediaSessionManager? =
@@ -124,7 +152,13 @@ class ExternalSessionBridge(private val context: Context) {
     /* ─────────────────  ПОДКЛЮЧЕНИЕ  ───────────────── */
 
     private fun bind(controllers: List<MediaController>?) {
-        val target = controllers?.firstOrNull { it.packageName in CONTROLLABLE }
+        val target = if (preferBluetooth) {
+            controllers?.firstOrNull { isBluetoothPackage(it.packageName) }
+                ?: controllers?.firstOrNull { it.packageName in CONTROLLABLE }
+        } else {
+            controllers?.firstOrNull { it.packageName in CONTROLLABLE }
+                ?: controllers?.firstOrNull { isBluetoothPackage(it.packageName) }
+        }
         if (target == null) {
             detach()
             _available.value = false
@@ -173,8 +207,9 @@ class ExternalSessionBridge(private val context: Context) {
             isPlaying = st?.state == PlaybackState.STATE_PLAYING,
             positionMs = st?.position ?: 0L,
             durationMs = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
-            sourceLabel = when (c.packageName) {
-                PKG_YANDEX_MUSIC -> "Яндекс.Музыка"
+            sourceLabel = when {
+                isBluetoothPackage(c.packageName) -> "Bluetooth · телефон"
+                c.packageName == PKG_YANDEX_MUSIC -> "Яндекс.Музыка"
                 else -> c.packageName
             }
         )
@@ -338,7 +373,48 @@ class ExternalSessionBridge(private val context: Context) {
      * приложения тихий путь не поддерживает, есть безусловный резерв — вместо
      * того чтобы просто не заиграть.
      */
-    suspend fun connect(pkg: String = PKG_YANDEX_MUSIC, timeoutMs: Long = 12_000): Boolean {
+    /** Играет ли сейчас что-то по Bluetooth — есть ли живая сессия BT-стека. */
+    fun hasBluetoothSession(): Boolean {
+        val list = runCatching { manager?.getActiveSessions(listenerComponent) }.getOrNull()
+        return list?.any { isBluetoothPackage(it.packageName) } == true
+    }
+
+    /** Подключена ли сейчас активная сессия именно к Bluetooth-стеку. */
+    fun activeIsBluetooth(): Boolean =
+        active?.packageName?.let { isBluetoothPackage(it) } == true
+
+    /**
+     * Подцепиться к Bluetooth-сессии, если она есть.
+     *
+     * Ничего не запускает и не открывает: телефон либо уже играет, либо нет.
+     * Разбудить чужое приложение на другом устройстве оболочка не может — по AVRCP
+     * можно только нажать «play» тому, кто уже держит сессию.
+     */
+    fun attachBluetooth(): Boolean {
+        preferBluetooth = true
+        refresh()
+        return activeIsBluetooth()
+    }
+
+    /**
+     * Поднять приложение и дождаться его медиасессии.
+     *
+     * [allowVisibleLaunch] — можно ли в крайнем случае честно открыть Activity
+     * приложения. При переключении вкладки в плеере это запрещено: экран оболочки
+     * не должен перекрываться ничем, даже на мгновение. Раньше вспышка чужого
+     * интерфейса всё-таки случалась — оболочка открывала приложение и тут же
+     * забирала фокус обратно, и на слабом ГУ это выглядело как моргание.
+     *
+     * Когда видимый запуск запрещён и разбудить приложение тихо не удалось,
+     * функция честно возвращает false: вызывающий покажет подсказку открыть
+     * приложение вручную один раз. Дальше оно останется в памяти, и следующие
+     * переключения пройдут уже бесшумно.
+     */
+    suspend fun connect(
+        pkg: String = PKG_YANDEX_MUSIC,
+        timeoutMs: Long = 12_000,
+        allowVisibleLaunch: Boolean = true
+    ): Boolean {
         if (!hasAccess()) return false
 
         refresh()
@@ -354,9 +430,12 @@ class ExternalSessionBridge(private val context: Context) {
 
             if (silentlyPlaying) {
                 lastConnectWasVisible = false
-            } else {
+            } else if (allowVisibleLaunch) {
                 lastConnectWasVisible = true
                 launchApp(pkg)
+            } else {
+                lastConnectWasVisible = false
+                return false
             }
         } else {
             lastConnectWasVisible = false

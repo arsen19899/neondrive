@@ -116,6 +116,45 @@ fun MapPanel(
         }
     }
 
+    /*
+     * Восстановление маршрута после перезапуска оболочки.
+     *
+     * Оболочка на магнитоле перезапускается чаще обычного приложения: не хватило
+     * памяти, водитель заглушил машину на заправке, прошивка пересоздала активити.
+     * Терять из-за этого проложенный маршрут нельзя — набирать адрес заново за
+     * рулём мучительно. Точка назначения лежит в настройках, и как только появится
+     * фикс GPS, маршрут строится от нового текущего положения.
+     *
+     * Условие `!route.hasDestination` защищает от повторного построения: эффект
+     * перезапустится на первом же фиксе, а маршрут к тому моменту уже есть.
+     */
+    LaunchedEffect(gps.hasFix, settings.lastDestLat) {
+        if (!gps.hasFix) return@LaunchedEffect
+        if (route.hasDestination || route.loading) return@LaunchedEffect
+        val lat = settings.lastDestLat
+        val lon = settings.lastDestLon
+        if (lat.isNaN() || lon.isNaN()) return@LaunchedEffect
+        RouteHub.buildTo(
+            context = context,
+            fromLat = gps.lastLat,
+            fromLon = gps.lastLon,
+            toLat = lat,
+            toLon = lon,
+            title = settings.lastDestTitle
+        )
+    }
+
+    // Точку назначения запоминаем и забываем вместе с самим маршрутом.
+    LaunchedEffect(route.destLat, route.destLon, route.hasDestination) {
+        runCatching {
+            if (route.hasDestination) {
+                repo.setLastDestination(route.destLat, route.destLon, route.destTitle)
+            } else {
+                repo.clearLastDestination()
+            }
+        }
+    }
+
     /** Запустить ведение до выбранной точки. */
     val goTo: (Double, Double, String) -> Unit = { lat, lon, title ->
         if (gps.hasFix) {
@@ -271,6 +310,51 @@ fun MapPanel(
                 }
             }
 
+            // Маршрут — отдельной строкой над кнопками, у левого края.
+            //
+            // Раньше расстояние, время и время прибытия жили чипом внутри ряда
+            // управления. На узких экранах этот чип уезжал за границу вместе с
+            // прокруткой ряда, и водитель не видел ни сколько ехать, ни когда
+            // приедет, пока не домотает кнопки вбок. Теперь это отдельная строка,
+            // которая никуда не прокручивается.
+            if (route.hasRoute || route.loading) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xCC060B14))
+                        .border(1.dp, accent2.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .clickable { RouteHub.clear() }
+                        .padding(start = 11.dp, end = 9.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        when {
+                            route.loading -> "Строим маршрут…"
+                            guidance.active -> buildString {
+                                append(guidance.remainingLabel)
+                                append(" · ")
+                                append(guidance.etaLabel)
+                                if (guidance.arrivalLabel.isNotBlank()) {
+                                    append(" · в ")
+                                    append(guidance.arrivalLabel)
+                                }
+                            }
+                            else -> "${formatDistance(route.distanceM)} · " +
+                                formatDuration(route.durationSec)
+                        },
+                        color = Neon.TextHi,
+                        fontSize = if (compact) 12.sp else 13.sp,
+                        maxLines = 1,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Icon(
+                        Icons.Rounded.Close, "Сбросить маршрут",
+                        tint = Neon.Red, modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
             // Единственный ряд управления. Прокручивается по горизонтали: на
             // трети экрана всё сразу не помещается ни при каком сжатии, а
             // обрезать кнопки молча — хуже, чем дать их домотать.
@@ -307,46 +391,6 @@ fun MapPanel(
                         zoom = (zoom + 1.0).coerceAtMost(19.0)
                     }
 
-                    // Расстояние, время в пути и время прибытия — одной строкой,
-                    // вместе с крестиком сброса. Раньше это были три разных
-                    // элемента в разных углах карты.
-                    if (route.hasRoute || route.loading) {
-                        Row(
-                            Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xCC060B14))
-                                .border(
-                                    1.dp,
-                                    accent2.copy(alpha = 0.45f),
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .clickable { RouteHub.clear() }
-                                .padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                when {
-                                    route.loading -> "Строим маршрут…"
-                                    guidance.active ->
-                                        "${guidance.remainingLabel} · ${guidance.etaLabel}" +
-                                            guidance.arrivalLabel.let {
-                                                if (it.isBlank()) "" else " · $it"
-                                            }
-                                    else -> "${formatDistance(route.distanceM)} · " +
-                                        formatDuration(route.durationSec)
-                                },
-                                color = Neon.TextHi,
-                                fontSize = if (compact) 12.sp else 13.sp,
-                                maxLines = 1,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Spacer(Modifier.size(7.dp))
-                            Icon(
-                                Icons.Rounded.Close, "Сбросить маршрут",
-                                tint = Neon.Red, modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
                 // Кнопки «открыть сторонний навигатор» здесь намеренно нет.
                 // Она дублировала плитку «Навигация» в доке, занимала место в
                 // единственном ряду управления и подписывалась именем чужого

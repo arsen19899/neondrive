@@ -157,6 +157,19 @@ data class LauncherSettings(
     val navFavorites: List<FavoritePlace> = emptyList(),
     /** История поиска, последние запросы. */
     val navSearchHistory: List<String> = emptyList(),
+    /**
+     * Незавершённый маршрут: точка назначения и её название.
+     *
+     * Оболочка на магнитоле перезапускается чаще, чем обычное приложение — от
+     * нехватки памяти, от пересоздания при смене конфигурации, просто от того,
+     * что водитель заглушил машину на заправке. Терять из-за этого проложенный
+     * маршрут нельзя: набирать адрес заново за рулём — худшее, что можно
+     * предложить. NaN — активного маршрута нет.
+     */
+    val lastDestLat: Double = Double.NaN,
+    val lastDestLon: Double = Double.NaN,
+    val lastDestTitle: String = "",
+
     /** Сохранённая точка «Дом»; NaN — не задана. */
     val homeLat: Double = Double.NaN,
     val homeLon: Double = Double.NaN,

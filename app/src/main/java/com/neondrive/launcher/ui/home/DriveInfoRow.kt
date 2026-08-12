@@ -42,13 +42,15 @@ import com.neondrive.launcher.ui.theme.Neon
 import kotlin.math.roundToInt
 
 /**
- * Приборы: спидометр отдельной строкой, под ним заправка и погода.
+ * Приборы: заправка, спидометр и погода.
  *
- * Раньше все три виджета стояли в один ряд. На узкой колонке — а она узкая всегда,
- * когда под навигацию отдана половина экрана и больше — каждому доставалась треть
- * от трети, и вместо «3,0 км» и «+12°» оставались огрызки «3» и «-|». Спидометр
- * самый важный и самый широкий, поэтому ему отдана вся строка целиком, а заправка
- * с погодой делят вторую: их значения короткие и в половину строки помещаются.
+ * Раскладка зависит от ширины колонки, и это не косметика. Пока места хватает —
+ * все три виджета стоят в один ряд, как и было всегда. Но когда под навигацию
+ * отдано две трети экрана, колонке приборов остаётся около двух сотен точек, на
+ * виджет приходится треть от этого, и вместо «3,0 км» и «+12°» остаются огрызки
+ * «3» и «-|». Ниже порога раскладка перестраивается в две строки: спидометр —
+ * самый важный и самый широкий — забирает строку целиком, а заправка с погодой
+ * делят вторую, их значения короткие и в половину строки помещаются.
  *
  * Два требования, которые раньше нарушались:
  *  1. У каждого виджета непрозрачный тёмный фон, а не только рамка — на рабочем
@@ -72,22 +74,38 @@ fun DriveInfoRow(
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        // Пороги считаем по ширине виджета нижней строки — она делится пополам,
-        // и именно ей тесно. Спидометру во всю ширину плохо не бывает.
-        val perWidgetWidth = maxWidth / 2.1f
+        // 300 dp — та ширина, ниже которой одному виджету из трёх остаётся меньше
+        // ста точек вместе с отступами, и значения начинают обрезаться. Выше этого
+        // порога раскладка ровно та, что была изначально.
+        val twoRows = maxWidth < 300.dp
+
+        // Пороги размеров считаются по ширине, которая реально достаётся виджету:
+        // в один ряд это треть, в два ряда — половина нижней строки.
+        val perWidgetWidth = if (twoRows) maxWidth / 2.1f else maxWidth / 3.15f
         val compact = perWidgetWidth < 110.dp
         val tiny = perWidgetWidth < 85.dp
 
-        Column(
-            Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SpeedoPanel(gps, units, accent, compact, tiny, Modifier.fillMaxWidth())
+        if (twoRows) {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SpeedoPanel(gps, units, accent, compact, tiny, Modifier.fillMaxWidth())
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FuelWidget(fuel, accent2, compact, tiny, Modifier.weight(1f))
+                    WeatherWidget(weather, accent2, compact, tiny, Modifier.weight(1f))
+                }
+            }
+        } else {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FuelWidget(fuel, accent2, compact, tiny, Modifier.weight(1f))
+                SpeedoPanel(gps, units, accent, compact, tiny, Modifier.weight(1.15f))
                 WeatherWidget(weather, accent2, compact, tiny, Modifier.weight(1f))
             }
         }
