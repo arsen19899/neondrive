@@ -27,6 +27,12 @@
          Микрофон помечен необязательным — оболочка обязана ставиться и на
          магнитолы без него, просто без голосовых команд. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Докачка карт, модели распознавания и базы камер фоновым сервисом.
+         С Android 14 тип сервиса переднего плана надо не только объявить у
+         самого сервиса, но и запросить отдельным разрешением, иначе
+         startForeground падает с SecurityException. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Автозапуск оболочки после включения ГУ -->
@@ -127,6 +133,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Докачка недостающих файлов: карты, модель распознавания, камеры.
+             Отдельный сервис, а не корутина в экране настроек: карта весит
+             триста мегабайт, на дорожной связи это десятки минут, и активити
+             за это время успевает пересоздаться. -->
+        <service
+            android:name=".assets.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Фоновая автоматика: скорость, звонки, кнопки руля -->
         <service

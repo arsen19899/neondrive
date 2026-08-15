@@ -78,6 +78,8 @@ import com.neondrive.launcher.ui.common.NeonToggle
 import com.neondrive.launcher.ui.common.SettingRow
 import com.neondrive.launcher.ui.common.SettingsSection
 import com.neondrive.launcher.ui.theme.Neon
+import com.neondrive.launcher.assets.AssetCatalog
+import com.neondrive.launcher.assets.AssetHub
 import com.neondrive.launcher.voice.VoiceAssistant
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.neonGlow
@@ -1200,15 +1202,22 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     // флеш-память ГУ и в первый раз может занять секунды.
     val offlineReady = remember { OfflineRouter.isReady(context) }
     val offlineStatus = remember { OfflineRouter.status(context) }
-    val offlineMapReady = remember { OfflineMap.isPresent(context) }
     // Состояние голосового движка проверяется по кнопке, а не на каждой
     // перерисовке: проверка ищет папку модели на флеш-памяти ГУ. Счётчик нужен
     // ровно для того, чтобы человек, только что скопировавший модель по USB,
     // мог увидеть результат, не перезапуская оболочку.
     var voiceProbe by remember { mutableStateOf(0) }
-    val voiceStatus = remember(voiceProbe) { VoiceAssistant.statusText(context) }
-    val wakePossible = remember(voiceProbe) { VoiceAssistant.wakeWordPossible(context) }
-    val offlineMapStatus = remember { OfflineMap.status(context) }
+
+    // Всё, что зависит от наличия файлов на диске, пересчитывается после каждой
+    // докачки: иначе человек скачал бы карту прямо здесь и продолжал видеть
+    // «карта не найдена», пока не перезапустит оболочку.
+    val assetStates by AssetHub.states.collectAsState()
+    val filesKey = assetStates.values.count { it.phase == com.neondrive.launcher.assets.DownloadPhase.DONE }
+
+    val offlineMapReady = remember(filesKey) { OfflineMap.isPresent(context) }
+    val offlineMapStatus = remember(filesKey) { OfflineMap.status(context) }
+    val voiceStatus = remember(voiceProbe, filesKey) { VoiceAssistant.statusText(context) }
+    val wakePossible = remember(voiceProbe, filesKey) { VoiceAssistant.wakeWordPossible(context) }
 
 
     Column {
@@ -1417,11 +1426,11 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                     }
                 }
                 Hint(
-                    "Вся Беларусь — один файл на 304 МБ:\n" +
-                        "1) скачать https://download.mapsforge.org/maps/v5/europe/belarus.map\n" +
-                        "2) скопировать по USB в\n" +
-                        "   Android/data/${context.packageName}/files/map/\n" +
-                        "3) включить переключатель выше\n\n" +
+                    "Вся Беларусь — один файл на 304 МБ. Скачать его можно прямо " +
+                        "здесь, в разделе «Файлы для офлайна» ниже: оболочка положит " +
+                        "файл куда надо и включит переключатель выше сама. Вручную — " +
+                        "с https://download.mapsforge.org/maps/v5/europe/ по USB в\n" +
+                        "   Android/data/${context.packageName}/files/map/\n\n" +
                         "Растровыми тайлами то же самое заняло бы около 60 ГБ: карта здесь не " +
                         "хранится картинками, а рисуется на устройстве из геометрии дорог — " +
                         "поэтому в одном файле сразу все масштабы. Соседние страны кладутся " +
@@ -1461,6 +1470,34 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
 
         }
 
+        SettingsSection("Файлы для офлайна", accent) {
+            Text(
+                "Оболочка скачает и разложит их сама — нужно только разрешить. " +
+                    "Ничего не качается без нажатия: интернет в машине обычно " +
+                    "мобильный и платный.",
+                color = Neon.TextLow,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+            )
+
+            AssetCatalog.mapAssets().forEach { asset ->
+                AssetRow(asset, accent, accent2)
+            }
+
+            AssetRow(AssetCatalog.cameras(), accent, accent2)
+        }
+
+        Hint(
+            "Граф маршрутов сюда не входит, и это не недоделка: готового графа не " +
+                "существует в природе. Он собирается импортом карты OSM, а импорт " +
+                "требует нескольких гигабайт оперативной памяти и десятков минут " +
+                "процессорного времени — на магнитоле этого нет. Граф остаётся " +
+                "единственным, что делается на компьютере: скриптом build-graph.bat " +
+                "из репозитория.",
+            accent2
+        )
+
         SettingsSection("Голосовое управление «Елисей»", accent) {
             SettingRow(
                 "Голосовые команды",
@@ -1494,6 +1531,10 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                 SettingRow("Распознавание", voiceStatus, accent2) {
                     SmallButton("Проверить", accent2) { voiceProbe++ }
                 }
+
+                // Модель качается прямо отсюда — ради этого всё и затевалось:
+                // раньше её надо было нести на магнитолу по USB с компьютера.
+                AssetRow(AssetCatalog.voskModel(), accent, accent2)
             }
         }
 
