@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +51,7 @@ import com.neondrive.launcher.nav.PlaceCategory
 import com.neondrive.launcher.nav.PlaceSearch
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonPanel
+import com.neondrive.launcher.voice.VoiceAssistant
 import kotlinx.coroutines.delay
 
 /**
@@ -77,6 +80,7 @@ fun NavSearchDialog(
     onSaveFavorite: (Place) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<PlaceCategory?>(null) }
     var results by remember { mutableStateOf<List<Place>>(emptyList()) }
@@ -185,6 +189,31 @@ fun NavSearchDialog(
                             tint = Neon.TextLow, modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+
+                // Голосовой ввод адреса. Набирать текст за рулём — то, ради чего
+                // голосовое управление вообще нужно, поэтому кнопка стоит прямо
+                // в строке поиска, а не прячется в меню. Диктовка не разбирается
+                // как команда: сказанное просто ложится в поле, и дальше работает
+                // обычный поиск с задержкой.
+                Spacer(Modifier.size(6.dp))
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(accent2.copy(alpha = 0.16f))
+                        .clickable {
+                            category = null
+                            VoiceAssistant.dictate(context) { spoken ->
+                                if (spoken.isNotBlank()) query = spoken
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.Mic, "Сказать адрес",
+                        tint = accent2, modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 

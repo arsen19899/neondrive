@@ -23,6 +23,12 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
 
+    <!-- Голосовое управление «Елисей»: распознавание речи с микрофона ГУ.
+         Микрофон помечен необязательным — оболочка обязана ставиться и на
+         магнитолы без него, просто без голосовых команд. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- Автозапуск оболочки после включения ГУ -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -45,6 +51,13 @@
         <package android:name="ru.yandex.yandexnavi" />
         <package android:name="ru.yandex.yandexmaps" />
         <package android:name="ru.yandex.music" />
+        <!-- Чтобы SpeechRecognizer.isRecognitionAvailable() честно отвечал на
+             Android 11+: без объявленного запроса система скрывает от нас
+             сервисы распознавания, и запасной движок выглядел бы отсутствующим
+             даже там, где он есть. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <application

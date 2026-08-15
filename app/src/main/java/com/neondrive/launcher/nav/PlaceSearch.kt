@@ -73,6 +73,7 @@ object PlaceSearch {
 
     private const val PHOTON = "https://photon.komoot.io/api/"
     private const val NOMINATIM = "https://nominatim.openstreetmap.org/search"
+    private const val NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
 
     private val OVERPASS_MIRRORS = listOf(
         "https://overpass-api.de/api/interpreter",
@@ -161,6 +162,44 @@ object PlaceSearch {
             )
         }
         return out.sortedBy { it.straightM }
+    }
+
+    /* ─────────────────  ОБРАТНОЕ ГЕОКОДИРОВАНИЕ  ───────────────── */
+
+    /**
+     * Адрес по координатам — «где я».
+     *
+     * Нужно ровно для голосового ответа ассистента: назвать координаты вслух
+     * бессмысленно, человеку нужна улица. Отдельным сервисом, а не через
+     * системный [android.location.Geocoder], по той же причине, по которой в
+     * оболочке нет ничего от Google: на магнитолах без сервисов Google системный
+     * геокодер не подключён ни к чему и молча возвращает пустой список.
+     *
+     * `zoom=17` — уровень «дом и улица». Более крупный отдаёт район, более
+     * мелкий — номер здания, которого в OSM чаще всего нет, и ответ становится
+     * длиннее без пользы.
+     *
+     * Возвращает null, если сети нет: спрашивать «где я» без интернета
+     * бессмысленно, и лучше честно сказать об этом, чем выдумать адрес.
+     */
+    suspend fun reverse(lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+        val url = NOMINATIM_REVERSE + "?format=jsonv2&accept-language=ru&zoom=17" +
+            "&lat=$lat&lon=$lon"
+        val text = runCatching { get(url) }.getOrNull() ?: return@withContext null
+        runCatching {
+            val o = JSONObject(text)
+            val addr = o.optJSONObject("address")
+            val road = addr?.optString("road").orEmpty()
+            val house = addr?.optString("house_number").orEmpty()
+            val city = listOf("city", "town", "village", "hamlet", "municipality")
+                .firstNotNullOfOrNull { addr?.optString(it)?.takeIf(String::isNotBlank) }
+                .orEmpty()
+
+            val street = listOf(road, house).filter { it.isNotBlank() }.joinToString(" ")
+            listOf(street, city).filter { it.isNotBlank() }.joinToString(", ")
+                .ifBlank { o.optString("display_name").substringBefore(",") }
+                .takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     /* ─────────────────  ПОИСК ПО КАТЕГОРИИ  ───────────────── */

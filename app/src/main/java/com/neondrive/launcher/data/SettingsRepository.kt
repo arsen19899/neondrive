@@ -72,6 +72,9 @@ class SettingsRepository(private val context: Context) {
         val homeLat = doublePreferencesKey("home_lat")
         val homeLon = doublePreferencesKey("home_lon")
 
+        val voiceEnabled = booleanPreferencesKey("voice_enabled")
+        val voiceWakeWord = booleanPreferencesKey("voice_wake_word")
+
         val autoplay = booleanPreferencesKey("autoplay")
         val autoplayDelay = intPreferencesKey("autoplay_delay")
         val autoplaySource = stringPreferencesKey("autoplay_source")
@@ -146,6 +149,9 @@ class SettingsRepository(private val context: Context) {
             lastDestTitle = p[K.lastDestTitle] ?: d.lastDestTitle,
             homeLat = p[K.homeLat] ?: d.homeLat,
             homeLon = p[K.homeLon] ?: d.homeLon,
+
+            voiceEnabled = p[K.voiceEnabled] ?: d.voiceEnabled,
+            voiceWakeWord = p[K.voiceWakeWord] ?: d.voiceWakeWord,
 
             autoplay = p[K.autoplay] ?: d.autoplay,
             autoplayDelaySec = p[K.autoplayDelay] ?: d.autoplayDelaySec,
@@ -254,6 +260,9 @@ class SettingsRepository(private val context: Context) {
         it[K.homeLat] = Double.NaN
         it[K.homeLon] = Double.NaN
     }
+
+    suspend fun setVoiceEnabled(v: Boolean) = put { it[K.voiceEnabled] = v }
+    suspend fun setVoiceWakeWord(v: Boolean) = put { it[K.voiceWakeWord] = v }
 
     suspend fun setAutoplay(v: Boolean) = put { it[K.autoplay] = v }
     suspend fun setAutoplayDelay(sec: Int) = put { it[K.autoplayDelay] = sec.coerceIn(0, 60) }

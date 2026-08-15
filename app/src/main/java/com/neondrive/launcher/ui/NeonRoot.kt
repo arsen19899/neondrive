@@ -45,6 +45,9 @@ import com.neondrive.launcher.ui.phone.PhoneScreen
 import com.neondrive.launcher.ui.settings.SettingsScreen
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.NeonBackdrop
+import com.neondrive.launcher.ui.voice.VoiceOverlay
+import com.neondrive.launcher.voice.VoiceAssistant
+import com.neondrive.launcher.voice.VoiceScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -81,6 +84,26 @@ fun NeonRoot(
     // Библиотека подтягивается один раз при запуске оболочки
     LaunchedEffect(Unit) {
         runCatching { PlayerHub.refreshLibrary() }
+    }
+
+    /*
+     * «Елисей, открой настройки».
+     *
+     * Ассистент живёт в фоне и о Compose ничего не знает — он лишь сообщает,
+     * какой экран у него попросили. Перевод в NeonScreen делается здесь, в
+     * единственном месте, которое вообще вправе менять текущий экран.
+     */
+    LaunchedEffect(Unit) {
+        VoiceAssistant.screenRequests.collect { request ->
+            screen = when (request) {
+                VoiceScreen.HOME -> NeonScreen.HOME
+                VoiceScreen.APPS -> NeonScreen.APPS
+                VoiceScreen.SETTINGS -> NeonScreen.SETTINGS
+                VoiceScreen.EQUALIZER -> NeonScreen.EQUALIZER
+                VoiceScreen.MUSIC -> NeonScreen.MUSIC
+                VoiceScreen.PHONE -> NeonScreen.PHONE
+            }
+        }
     }
 
     NeonBackdrop(
@@ -203,6 +226,12 @@ fun NeonRoot(
                             }
                         }
                     }
+
+                    // Плашка ассистента рисуется ДО экрана звонка: разговор
+                    // важнее любой голосовой команды, и перекрывать его
+                    // сообщением «слушаю» нельзя. Порядок вызовов внутри Box и
+                    // есть порядок отрисовки.
+                    VoiceOverlay(accent = accent, accent2 = accent2)
 
                     CallOverlay(accent = accent, accent2 = accent2)
                 }

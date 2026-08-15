@@ -160,6 +160,18 @@ object GuidanceEngine {
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+
+    /**
+     * Ответ ассистента, сказанный до того, как поднялся движок синтеза.
+     *
+     * Синтез инициализируется асинхронно и на слабом ГУ занимает заметное время.
+     * Первая же голосовая команда после старта оболочки приходится ровно на это
+     * окно, и без очереди на одну фразу ответ на неё пропадал бы молча — самый
+     * неприятный вид сбоя для голосового управления: человек не понимает,
+     * услышали его или нет. Фраза одна, а не список: устаревшие ответы
+     * произносить нельзя, важен только последний.
+     */
+    private var pendingAssistant: String? = null
     private var voiceEnabled = true
     private var voiceVolume = 0.9f
     private var duckMusic = true
@@ -580,10 +592,46 @@ object GuidanceEngine {
                 }
             })
         }
+
+        // Ответ ассистента, прозвучавший до готовности синтеза, договариваем
+        // теперь — см. [pendingAssistant].
+        pendingAssistant?.let {
+            pendingAssistant = null
+            emit(it, force = true)
+        }
     }
 
     private fun speak(text: String, force: Boolean = false) {
-        if (!voiceEnabled || !ttsReady || text.isBlank()) return
+        if (!voiceEnabled) return
+        emit(text, force)
+    }
+
+    /**
+     * Произнести ответ голосового ассистента «Елисей».
+     *
+     * Отдельный вход в синтез, а не [speakExternal], по двум причинам.
+     *
+     * Первая: тумблер «голосовые подсказки» относится к ведению по маршруту.
+     * Человек, выключивший объявление поворотов, не просил ассистента молчать в
+     * ответ на прямой вопрос — у голосового управления свой тумблер, и смешивать
+     * их значило бы делать одну настройку молча зависимой от другой.
+     *
+     * Вторая: ответ ассистента всегда вытесняет очередь ([TextToSpeech.QUEUE_FLUSH]).
+     * Подсказки маршрута выстраиваются в очередь осознанно, но ответ на только
+     * что заданный вопрос, произнесённый после двух накопившихся «через триста
+     * метров направо», приходит слишком поздно, чтобы быть ответом.
+     *
+     * [context] нужен, потому что ассистентом можно пользоваться, не начиная
+     * никакой поездки: синтез в этом случае ещё не поднимался.
+     */
+    fun speakAssistant(context: Context, text: String) {
+        if (text.isBlank()) return
+        initTts(context)
+        if (ttsReady) emit(text, force = true) else pendingAssistant = text
+    }
+
+    private fun emit(text: String, force: Boolean = false) {
+        if (!ttsReady || text.isBlank()) return
         requestFocus()
         runCatching {
             val params = Bundle().apply {

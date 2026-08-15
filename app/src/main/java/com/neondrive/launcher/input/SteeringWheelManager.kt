@@ -249,7 +249,12 @@ object SteeringWheelManager {
             SwcAction.SOURCE_NEXT -> PlayerHub.cycleSource()
             SwcAction.ANSWER_CALL -> answerCall(ctx)
             SwcAction.END_CALL -> endCall(ctx)
-            SwcAction.VOICE -> launchIntent(ctx, Intent(Intent.ACTION_VOICE_COMMAND))
+            // Раньше кнопка отдавала управление системному голосовому помощнику
+            // через ACTION_VOICE_COMMAND — на магнитолах без сервисов Google
+            // этот Intent обычно не обрабатывает никто, и кнопка молчала.
+            // Теперь она открывает собственного «Елисея», а если голосовое
+            // управление выключено или недоступно, он сам скажет почему.
+            SwcAction.VOICE -> com.neondrive.launcher.voice.VoiceAssistant.pushToTalk(ctx)
             SwcAction.HOME -> launchIntent(
                 ctx,
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)

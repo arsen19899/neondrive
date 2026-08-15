@@ -78,6 +78,7 @@ import com.neondrive.launcher.ui.common.NeonToggle
 import com.neondrive.launcher.ui.common.SettingRow
 import com.neondrive.launcher.ui.common.SettingsSection
 import com.neondrive.launcher.ui.theme.Neon
+import com.neondrive.launcher.voice.VoiceAssistant
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.neonGlow
 import kotlin.math.roundToInt
@@ -1200,6 +1201,13 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
     val offlineReady = remember { OfflineRouter.isReady(context) }
     val offlineStatus = remember { OfflineRouter.status(context) }
     val offlineMapReady = remember { OfflineMap.isPresent(context) }
+    // Состояние голосового движка проверяется по кнопке, а не на каждой
+    // перерисовке: проверка ищет папку модели на флеш-памяти ГУ. Счётчик нужен
+    // ровно для того, чтобы человек, только что скопировавший модель по USB,
+    // мог увидеть результат, не перезапуская оболочку.
+    var voiceProbe by remember { mutableStateOf(0) }
+    val voiceStatus = remember(voiceProbe) { VoiceAssistant.statusText(context) }
+    val wakePossible = remember(voiceProbe) { VoiceAssistant.wakeWordPossible(context) }
     val offlineMapStatus = remember { OfflineMap.status(context) }
 
 
@@ -1453,6 +1461,42 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
 
         }
 
+        SettingsSection("Голосовое управление «Елисей»", accent) {
+            SettingRow(
+                "Голосовые команды",
+                "Кнопка «Голосовой помощник» на руле и микрофон в поиске адреса",
+                accent
+            ) {
+                NeonToggle(s.voiceEnabled, accent) { v ->
+                    edit { it.setVoiceEnabled(v) }
+                }
+            }
+
+            if (s.voiceEnabled) {
+                SettingRow(
+                    "Ждать обращение «Елисей»",
+                    if (wakePossible)
+                        "Микрофон остаётся открытым всю поездку. Команду можно " +
+                            "сказать не нажимая ничего: «Елисей, поехали домой»."
+                    else
+                        "Недоступно без офлайн-модели: системный распознаватель " +
+                            "не умеет ждать ключевое слово. Кнопка руля работает.",
+                    accent
+                ) {
+                    NeonToggle(
+                        s.voiceWakeWord && wakePossible,
+                        if (wakePossible) accent else Neon.TextLow
+                    ) { v ->
+                        if (wakePossible) edit { it.setVoiceWakeWord(v) }
+                    }
+                }
+
+                SettingRow("Распознавание", voiceStatus, accent2) {
+                    SmallButton("Проверить", accent2) { voiceProbe++ }
+                }
+            }
+        }
+
         SettingsSection("Точка «Дом»", accent) {
             SettingRow(
                 "Сохранённая точка",
@@ -1473,6 +1517,22 @@ private fun NavTab(s: LauncherSettings, accent: Color, accent2: Color, edit: Set
                 }
             }
         }
+
+        Hint(
+            "«Елисей» — офлайн. Распознавание работает на самой магнитоле, без " +
+                "интернета и без сервисов Google, но модель языка в APK не помещается: " +
+                "она весит около 45 МБ. Скачайте vosk-model-small-ru с " +
+                "alphacephei.com/vosk/models и распакуйте в папку vosk/ рядом с картой — " +
+                "Android/data/com.neondrive.launcher/files/.\n\n" +
+                "Без модели голос тоже работает, но через системный распознаватель: он " +
+                "есть не на всех магнитолах и не умеет ждать «Елисея» — команду " +
+                "придётся начинать с кнопки на руле.\n\n" +
+                "Что понимает: «поехали на Ленина 5», «домой», «ближайшая заправка», " +
+                "«отмени маршрут», «сколько ехать», «где я» · «следующий трек», " +
+                "«громче», «громкость 40», «пауза», «включи радио» · «позвони Ивану», " +
+                "«ответь», «сбрось» · «открой настройки».",
+            accent
+        )
 
         Hint(
             "Навигация целиком своя: карта OpenStreetMap, маршруты OSRM, поиск по " +

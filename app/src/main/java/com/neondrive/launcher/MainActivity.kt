@@ -31,6 +31,7 @@ import com.neondrive.launcher.ui.NeonRoot
 import com.neondrive.launcher.ui.NeonScreen
 import com.neondrive.launcher.ui.theme.NeonAccent
 import com.neondrive.launcher.ui.theme.NeonDriveTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -62,6 +63,16 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             SpeedProvider.start(applicationContext)
             lifecycleScope.launch { runCatching { PlayerHub.refreshLibrary() } }
+            // Разрешение на микрофон могли дать только что — ассистент должен
+            // начать слушать сразу, не дожидаясь следующего запуска оболочки.
+            lifecycleScope.launch {
+                runCatching {
+                    com.neondrive.launcher.voice.VoiceAssistant.configure(
+                        applicationContext,
+                        repo.settings.first()
+                    )
+                }
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,6 +123,10 @@ class MainActivity : ComponentActivity() {
                     speedLimitEnabled = s.navSpeedLimitWarn
                     toleranceKmh = s.navSpeedTolerance
                 }
+                // Голосовое управление настраивается здесь же, вместе со всем
+                // остальным: тумблер ожидания «Елисея» должен включать и
+                // выключать микрофон сразу, а не со следующего запуска.
+                com.neondrive.launcher.voice.VoiceAssistant.configure(applicationContext, s)
                 if (s.keepScreenOn) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
@@ -214,6 +229,11 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             need += Manifest.permission.BLUETOOTH_CONNECT
         }
+        // Микрофон для голосовых команд. Просим вместе со всем остальным при
+        // первом запуске, а не в момент первого нажатия кнопки руля: диалог
+        // разрешения, всплывающий на ходу поверх карты, — худший момент из
+        // возможных.
+        need += Manifest.permission.RECORD_AUDIO
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Нужно кнопке руля «Принять вызов» (SteeringWheelManager.answerCall) —
             // без него acceptRingingCall() падает по SecurityException.
