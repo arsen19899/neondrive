@@ -50,7 +50,8 @@ object SystemSpeechEngine : SpeechEngine {
         context: Context,
         purpose: ListenPurpose,
         onResult: (SpeechResult) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onReady: () -> Unit
     ) {
         if (purpose == ListenPurpose.WAKE_WORD) {
             onError("Системный распознаватель не умеет ждать ключевое слово")
@@ -71,7 +72,9 @@ object SystemSpeechEngine : SpeechEngine {
         recognizer = created
 
         created.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) = Unit
+            override fun onReadyForSpeech(params: Bundle?) {
+                onReady()
+            }
             override fun onBeginningOfSpeech() = Unit
             override fun onRmsChanged(rmsdB: Float) = Unit
             override fun onBufferReceived(buffer: ByteArray?) = Unit

@@ -64,6 +64,18 @@ object OfflineMap {
 
     fun isPresent(context: Context): Boolean = mapFiles(context).isNotEmpty()
 
+    /**
+     * Почему последняя попытка открыть карту не удалась.
+     *
+     * Раньше [open] просто возвращал null на любую ошибку, и снаружи «файла
+     * нет», «файл битый» и «библиотека не собралась» выглядели одинаково —
+     * пустой картой. Отличить их можно было только логом с устройства, до
+     * которого в машине не добраться. Теперь причина видна прямо в настройках.
+     */
+    @Volatile
+    var lastError: String = ""
+        private set
+
     /** Человекочитаемый статус для экрана настроек. */
     fun status(context: Context): String {
         val files = mapFiles(context)
@@ -73,6 +85,10 @@ object OfflineMap {
         }
         val totalMb = files.sumOf { it.length() } / (1024 * 1024)
         val names = files.joinToString(", ") { it.name }
+        val err = lastError
+        if (err.isNotBlank()) {
+            return "Файл есть ($names, $totalMb МБ), но открыть его не удалось: $err"
+        }
         return "Готово: $names — $totalMb МБ, карта работает без интернета"
     }
 
@@ -116,7 +132,11 @@ object OfflineMap {
                 null
             )
             Handle(provider, source)
-        }.getOrNull()
+        }.onSuccess { lastError = "" }
+            .onFailure { e ->
+                lastError = e.javaClass.simpleName + ": " + (e.message ?: "без описания")
+            }
+            .getOrNull()
     }
 
     /**

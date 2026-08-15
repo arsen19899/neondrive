@@ -33,6 +33,7 @@ import com.neondrive.launcher.nav.RoutePoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.MapTileProviderBasic
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -133,25 +134,29 @@ fun EmbeddedMap(
         offline = opened
     }
 
-    // Освобождать открытый файл и поток темы оформления обязательно: иначе
-    // каждое переключение настройки оставляло бы за собой ещё одну открытую
-    // карту. `current` захватывается специально — в onDispose нужно прежнее
-    // значение, а не то, что уже пришло ему на смену.
-    val current = offline
-    DisposableEffect(current) {
-        onDispose { runCatching { current?.dispose() } }
-    }
-
-    // MapView пересоздаётся вместе со сменой источника тайлов: поставщик
-    // задаётся конструктором и живёт ровно столько же, сколько сама карта.
-    // Камеру после пересоздания вернёт на место слушатель компоновки ниже.
-    val mapView = remember(offline) {
+    /*
+     * MapView создаётся ОДИН раз и живёт ровно столько, сколько панель на экране.
+     *
+     * Здесь раньше стоял `remember(offline)`: карта пересоздавалась, как только
+     * офлайн-файл открывался. Так делать нельзя, и именно отсюда бралась серая
+     * сетка вместо карты.
+     *
+     * Во-первых, `AndroidView` вызывает свой `factory` ровно один раз за всё
+     * время жизни узла — новый MapView в него уже не попадал, и на экране
+     * навсегда оставался первый, сетевой. Во-вторых, и это хуже, эффект
+     * `DisposableEffect(mapView)` в конце функции на смену ключа вызывал
+     * `onDetach()` у той самой карты, которая осталась на экране, а `onDetach`
+     * отключает поставщик тайлов. Дальше карте нечего было рисовать: сетевые
+     * тайлы больше не запрашивались, офлайновые уходили в невидимую вторую
+     * карту, и оставался пустой фон osmdroid с разметкой — «сетка».
+     *
+     * Поставщик тайлов меняется на живой карте (`setTileProvider`) — osmdroid
+     * это умеет и сам пересобирает слой тайлов.
+     */
+    val mapView = remember {
         configureOsmdroid(context)
-        val view = offline?.let { MapView(context, it.provider) } ?: MapView(context)
-        view.apply {
-            // Источник тайлов трогаем только у сетевой карты: у офлайновой он
-            // уже задан поставщиком, и Mapnik бы его затёр.
-            if (offline == null) setTileSource(TileSourceFactory.MAPNIK)
+        MapView(context).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             // Свои кнопки зума не нужны — в панели карты есть чипы «+/−»,
             // а системные оверлеи osmdroid смотрятся чужеродно.
@@ -174,6 +179,45 @@ fun EmbeddedMap(
         }
     }
 
+    /*
+     * Переключение «сеть ⇄ офлайн-файл» на живой карте.
+     *
+     * Установка поставщика и освобождение файла сделаны ОДНИМ эффектом
+     * намеренно: закрыть mapsforge-файл раньше, чем карта перестала из него
+     * читать, — верный способ уронить поток отрисовки тайлов. Здесь сначала на
+     * карту возвращается сетевой поставщик, и только потом закрывается файл.
+     */
+    DisposableEffect(offline, mapView) {
+        val handle = offline
+        runCatching {
+            mapView.setTileProvider(
+                handle?.provider
+                    ?: MapTileProviderBasic(context.applicationContext, TileSourceFactory.MAPNIK)
+            )
+            // setTileProvider собирает новый слой тайлов, поэтому ночную
+            // инверсию и пределы масштаба надо выставить заново.
+            mapView.overlayManager.tilesOverlay.setColorFilter(
+                if (nightTiles) TilesOverlay.INVERT_COLORS else null
+            )
+            mapView.setMinZoomLevel(3.0)
+            mapView.setMaxZoomLevel(19.0)
+            mapView.invalidate()
+        }
+        onDispose {
+            if (handle != null) {
+                runCatching {
+                    mapView.setTileProvider(
+                        MapTileProviderBasic(
+                            context.applicationContext,
+                            TileSourceFactory.MAPNIK
+                        )
+                    )
+                }
+                runCatching { handle.dispose() }
+            }
+        }
+    }
+
     // Линия маршрута — отдельный оверлей, который переживает смену маршрута:
     // пересоздавать Polyline на каждое обновление дороже, чем заменить в нём точки.
     val routeOverlay = remember {
@@ -185,9 +229,6 @@ fun EmbeddedMap(
         }
     }
 
-    // mapView в ключах не для красоты: карта пересоздаётся при переключении на
-    // офлайн-файл, а оверлей маршрута переживает пересоздание — без этого ключа
-    // линия осталась бы в списке оверлеев старой, уже выброшенной карты.
     LaunchedEffect(route, accent, mapView) {
         runCatching {
             routeOverlay.outlinePaint.color = accent.toArgb()

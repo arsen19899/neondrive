@@ -158,7 +158,8 @@ object VoskEngine : SpeechEngine {
         context: Context,
         purpose: ListenPurpose,
         onResult: (SpeechResult) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onReady: () -> Unit
     ) {
         if (!libraryPresent) {
             onError("Vosk не включён в сборку")
@@ -177,12 +178,19 @@ object VoskEngine : SpeechEngine {
         // грузим в фоне, а слушать начинаем уже в главном — SpeechService
         // отдаёт свои колбэки через Handler главного потока.
         Thread {
-            val loaded = runCatching { ensureModel(dir) }.getOrNull()
+            val attempt = runCatching { ensureModel(dir) }
+            val loaded = attempt.getOrNull()
             if (loaded == null) {
-                main.post { onError("Не удалось загрузить модель распознавания") }
+                // Текст исключения нужен целиком. «Не удалось загрузить модель»
+                // не отличает битый архив от несобравшейся нативной библиотеки,
+                // а в машине посмотреть логи нечем.
+                val why = attempt.exceptionOrNull()?.let {
+                    it.javaClass.simpleName + ": " + (it.message ?: "без описания")
+                } ?: "причина неизвестна"
+                main.post { onError("Модель не загрузилась — $why") }
                 return@Thread
             }
-            main.post { launchService(loaded, purpose, onResult, onError) }
+            main.post { launchService(loaded, purpose, onResult, onError, onReady) }
         }.apply { isDaemon = true }.start()
     }
 
@@ -205,9 +213,10 @@ object VoskEngine : SpeechEngine {
         loadedModel: Any,
         purpose: ListenPurpose,
         onResult: (SpeechResult) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onReady: () -> Unit
     ) {
-        val ok = runCatching {
+        val attempt = runCatching {
             val modelCls = Class.forName(MODEL_CLASS)
             val recCls = Class.forName(RECOGNIZER_CLASS)
 
@@ -229,15 +238,25 @@ object VoskEngine : SpeechEngine {
             svcCls.getMethod("startListening", Class.forName(LISTENER_CLASS))
                 .invoke(svc, listener)
             true
-        }.getOrElse { false }
+        }
 
-        if (!ok) {
+        if (attempt.isSuccess) onReady()
+
+        if (attempt.isFailure) {
             // Самая частая причина — микрофон занят: разговор по телефону,
             // чужое приложение записи, на части прошивок ГУ — штатный
-            // «голосовой помощник» магнитолы. Это не повод считать движок
-            // сломанным, поэтому просто сообщаем и отпускаем ресурсы.
+            // «голосовой помощник» магнитолы. Но бывает и другое: нет нативной
+            // библиотеки под архитектуру, отозвано разрешение, AudioRecord не
+            // открывается на этой прошивке. Раз причин много — показываем ту,
+            // что случилась, а не одну на все случаи.
             releaseService()
-            onError("Микрофон недоступен")
+            val e = attempt.exceptionOrNull()
+            val why = if (e == null) {
+                "причина неизвестна"
+            } else {
+                e.javaClass.simpleName + ": " + (e.message ?: "без описания")
+            }
+            onError("Микрофон не запустился — $why")
         }
     }
 

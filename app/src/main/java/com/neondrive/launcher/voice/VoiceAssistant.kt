@@ -116,6 +116,19 @@ object VoiceAssistant {
     /** Сколько всего ждать команду, прежде чем сдаться и вернуться к ожиданию. */
     private const val COMMAND_TIMEOUT_MS = 9000L
 
+    /**
+     * Сколько ждать, пока движок откроет микрофон.
+     *
+     * Отдельный и куда более щедрый срок, чем [COMMAND_TIMEOUT_MS]: между
+     * нажатием кнопки и открытым микрофоном офлайн-движок читает с флеш-памяти
+     * ГУ модель на сорок мегабайт и строит по ней граф. На Cortex-A53 это
+     * секунды, иногда полтора десятка. Раньше оба срока были одним: тайм-аут
+     * молчания начинал тикать от нажатия кнопки, на медленном устройстве
+     * истекал раньше, чем микрофон успевал открыться, и всё заканчивалось
+     * молча — ровно то, что снаружи выглядит как мёртвая кнопка.
+     */
+    private const val ENGINE_READY_TIMEOUT_MS = 30_000L
+
     /** Сколько держать ответ на экране. */
     private const val REPLY_HOLD_MS = 4500L
 
@@ -236,7 +249,10 @@ object VoiceAssistant {
                 // микрофон. Просто гасим состояние, следующий заход произойдёт
                 // при смене настроек или после звонка.
                 _state.value = _state.value.copy(phase = VoicePhase.OFF, error = msg)
-            }
+            },
+            // Ожиданию ключевого слова момент открытия микрофона не важен:
+            // здесь нет ни тайм-аута молчания, ни подсказки голосом.
+            onReady = {}
         )
         _state.value = _state.value.copy(
             phase = VoicePhase.WAITING,
@@ -324,15 +340,28 @@ object VoiceAssistant {
         }
         activeEngine = engine
 
+        // Микрофон в этот момент ещё закрыт: движку нужно загрузить модель.
+        // Показываем это состояние отдельно от «слушаю» — иначе человек говорит
+        // в закрытый микрофон и считает, что его не слышат.
         _state.value = _state.value.copy(
-            phase = VoicePhase.LISTENING,
+            phase = VoicePhase.WORKING,
             heard = "",
-            reply = "",
+            reply = "Готовлю распознавание…",
             error = "",
             engineLabel = if (engine === VoskEngine) "Офлайн (Vosk)" else "Системный"
         )
 
         if (announce) GuidanceEngine.speakAssistant(ctx, "Слушаю")
+
+        // Сторожевой таймер на саму подготовку. Без него сбой, при котором
+        // движок не позвал ни onReady, ни onError, оставлял бы оболочку в
+        // «готовлю распознавание» навсегда.
+        commandJob = scope.launch {
+            delay(ENGINE_READY_TIMEOUT_MS)
+            if (session == commandSession && _state.value.phase == VoicePhase.WORKING) {
+                finishQuietly("Распознавание так и не запустилось")
+            }
+        }
 
         engine.start(
             context = ctx,
@@ -350,24 +379,35 @@ object VoiceAssistant {
                 // «Тишина» и «не расслышал» — не ошибки, а обычный исход, когда
                 // человек передумал говорить. Показывать их как сбой не нужно.
                 finishQuietly(msg)
+            },
+            onReady = {
+                if (session != commandSession) return@start
+                _state.value = _state.value.copy(
+                    phase = VoicePhase.LISTENING,
+                    reply = ""
+                )
+                // Только теперь имеет смысл отсчитывать молчание: до этого
+                // момента микрофона просто не было.
+                commandJob?.cancel()
+                commandJob = scope.launch {
+                    delay(PROMPT_AFTER_MS)
+                    if (session == commandSession &&
+                        _state.value.phase == VoicePhase.LISTENING &&
+                        _state.value.heard.isBlank() &&
+                        !announce &&
+                        dictationTarget == null
+                    ) {
+                        GuidanceEngine.speakAssistant(ctx, "Слушаю")
+                    }
+                    delay(COMMAND_TIMEOUT_MS - PROMPT_AFTER_MS)
+                    if (session == commandSession &&
+                        _state.value.phase == VoicePhase.LISTENING
+                    ) {
+                        finishQuietly("")
+                    }
+                }
             }
         )
-
-        commandJob = scope.launch {
-            delay(PROMPT_AFTER_MS)
-            if (session == commandSession &&
-                _state.value.phase == VoicePhase.LISTENING &&
-                _state.value.heard.isBlank() &&
-                !announce &&
-                dictationTarget == null
-            ) {
-                GuidanceEngine.speakAssistant(ctx, "Слушаю")
-            }
-            delay(COMMAND_TIMEOUT_MS - PROMPT_AFTER_MS)
-            if (session == commandSession && _state.value.phase == VoicePhase.LISTENING) {
-                finishQuietly("")
-            }
-        }
     }
 
     private fun pickEngine(ctx: Context): SpeechEngine? = when {
@@ -415,6 +455,18 @@ object VoiceAssistant {
         commandSession++
         commandJob?.cancel()
         stopListening()
+
+        // «Тишина» и «не расслышал» — обычный исход: человек передумал говорить,
+        // шуметь об этом незачем. А вот всё остальное — занятый микрофон, не
+        // загрузившаяся модель, отсутствующая нативная библиотека — это сбой, и
+        // молчать о нём нельзя: снаружи он выглядит как мёртвая кнопка. Именно
+        // из-за этого «жму микрофон — ничего не происходит» и не имело никакого
+        // объяснения на экране.
+        if (reason.isNotBlank() && reason != "Тишина" && reason != "Не расслышал") {
+            report(reason)
+            return
+        }
+
         _state.value = _state.value.copy(
             phase = VoicePhase.OFF,
             heard = "",

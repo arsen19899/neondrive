@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import com.neondrive.launcher.nav.PlaceSearch
 import com.neondrive.launcher.ui.theme.Neon
 import com.neondrive.launcher.ui.theme.neonPanel
 import com.neondrive.launcher.voice.VoiceAssistant
+import com.neondrive.launcher.voice.VoicePhase
 import kotlinx.coroutines.delay
 
 /**
@@ -215,6 +217,35 @@ fun NavSearchDialog(
                         tint = accent2, modifier = Modifier.size(18.dp)
                     )
                 }
+            }
+
+            /*
+             * Что сейчас с голосовым вводом — прямо здесь, в диалоге.
+             *
+             * Плашка ассистента (VoiceOverlay) живёт в окне оболочки, а диалог
+             * поиска — отдельное окно поверх него. Значит, из диалога её не
+             * видно вообще: ни «слушаю», ни сообщения об ошибке. Кнопка
+             * микрофона выглядела мёртвой независимо от того, что произошло —
+             * работает ли распознавание, занят ли микрофон, не загрузилась ли
+             * модель. Поэтому состояние дублируется строкой в самом диалоге.
+             */
+            val voice by VoiceAssistant.state.collectAsState()
+            val voiceLine = when {
+                voice.phase == VoicePhase.LISTENING -> voice.heard.ifBlank { "Слушаю…" }
+                voice.phase == VoicePhase.WORKING ->
+                    voice.reply.ifBlank { voice.heard.ifBlank { "Обрабатываю…" } }
+                voice.phase == VoicePhase.REPLY -> voice.reply
+                voice.error.isNotBlank() -> voice.error
+                else -> ""
+            }
+            if (voiceLine.isNotBlank()) {
+                Spacer(Modifier.size(10.dp))
+                Text(
+                    voiceLine,
+                    color = accent2,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp
+                )
             }
 
             Spacer(Modifier.size(12.dp))
