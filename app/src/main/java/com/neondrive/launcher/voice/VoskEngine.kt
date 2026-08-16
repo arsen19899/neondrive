@@ -3,10 +3,13 @@ package com.neondrive.launcher.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import org.json.JSONObject
 import java.io.File
 import java.lang.reflect.InvocationHandler
+import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
+import java.lang.reflect.UndeclaredThrowableException
 
 /**
  * Офлайн-распознавание речи моделью Vosk.
@@ -63,6 +66,8 @@ object VoskEngine : SpeechEngine {
     private const val LISTENER_CLASS = "org.vosk.android.RecognitionListener"
 
     private const val SAMPLE_RATE = 16000.0f
+
+    private const val TAG = "VoskEngine"
 
     /**
      * Грамматика режима ожидания.
@@ -141,8 +146,8 @@ object VoskEngine : SpeechEngine {
 
     override fun unavailableReason(context: Context): String = when {
         !libraryPresent ->
-            "Библиотека Vosk не включена в сборку. Раскомментируйте зависимость " +
-                "vosk-android в app/build.gradle.kts и пересоберите."
+            "Библиотека Vosk не включена в сборку. Раскомментируйте зависимости " +
+                "vosk-android и jna (обе с @aar) в app/build.gradle.kts и пересоберите."
         findModel(context) == null ->
             "Нет офлайн-модели распознавания. Скачайте vosk-model-small-ru с " +
                 "alphacephei.com/vosk/models и распакуйте в папку vosk/."
@@ -184,9 +189,9 @@ object VoskEngine : SpeechEngine {
                 // Текст исключения нужен целиком. «Не удалось загрузить модель»
                 // не отличает битый архив от несобравшейся нативной библиотеки,
                 // а в машине посмотреть логи нечем.
-                val why = attempt.exceptionOrNull()?.let {
-                    it.javaClass.simpleName + ": " + (it.message ?: "без описания")
-                } ?: "причина неизвестна"
+                val cause = attempt.exceptionOrNull()
+                Log.e(TAG, "Модель Vosk не загрузилась: " + dir.absolutePath, cause)
+                val why = describe(cause)
                 main.post { onError("Модель не загрузилась — $why") }
                 return@Thread
             }
@@ -251,12 +256,8 @@ object VoskEngine : SpeechEngine {
             // что случилась, а не одну на все случаи.
             releaseService()
             val e = attempt.exceptionOrNull()
-            val why = if (e == null) {
-                "причина неизвестна"
-            } else {
-                e.javaClass.simpleName + ": " + (e.message ?: "без описания")
-            }
-            onError("Микрофон не запустился — $why")
+            Log.e(TAG, "Vosk: микрофон не запустился", e)
+            onError("Микрофон не запустился — " + describe(e))
         }
     }
 
@@ -331,6 +332,63 @@ object VoskEngine : SpeechEngine {
         runCatching { closeQuietly(model) }
         model = null
         modelPath = null
+    }
+
+    /* ─────────────────  ОПИСАНИЕ СБОЯ  ───────────────── */
+
+    /**
+     * Настоящая причина сбоя, а не обёртка вокруг неё.
+     *
+     * Рефлексия прячет ошибку дважды. Всё, что бросил вызванный конструктор,
+     * приходит завёрнутым в [InvocationTargetException], а её собственный
+     * `message` равен null ВСЕГДА — она хранит причину отдельным полем. Если же
+     * упала статическая инициализация нативной части, сверху добавляется ещё и
+     * [ExceptionInInitializerError], у которого `message` тоже null.
+     *
+     * Из-за этого наружу уходило «InvocationTargetException: без описания» —
+     * строка, по которой в машине нельзя понять ровно ничего, и одинаковая для
+     * любой поломки: и для битой модели, и для не загрузившейся библиотеки.
+     * Разворачиваем цепочку до причины, у которой есть что сказать.
+     */
+    private fun rootCause(start: Throwable): Throwable {
+        var current = start
+        // Ограничение на всякий случай: цепочка причин теоретически может быть
+        // зациклена, а вешать оболочку из-за текста ошибки — совсем глупо.
+        var depth = 0
+        while (depth++ < 8) {
+            val here = current
+            val next: Throwable? = when (here) {
+                is InvocationTargetException -> here.targetException
+                is ExceptionInInitializerError -> here.exception
+                is UndeclaredThrowableException -> here.undeclaredThrowable
+                // Обычное исключение с текстом — уже само по себе объяснение,
+                // глубже лезть незачем.
+                else -> if (here.message.isNullOrBlank()) here.cause else null
+            }
+            if (next == null || next === here) return here
+            current = next
+        }
+        return current
+    }
+
+    /** Причина сбоя одной строкой — так, как её увидит человек за рулём. */
+    private fun describe(error: Throwable?): String {
+        if (error == null) return "причина неизвестна"
+        val root = rootCause(error)
+        val name = root.javaClass.simpleName
+        val message = root.message?.takeIf { it.isNotBlank() }
+
+        // Самый вероятный и самый непонятный со стороны случай: нативная часть
+        // не загрузилась. Голая «UnsatisfiedLinkError» не подсказывает ничего,
+        // поэтому добавляем то, что чинит проблему в девяти случаях из десяти.
+        val hint = when (root) {
+            is UnsatisfiedLinkError, is NoClassDefFoundError ->
+                ". Нативная библиотека не загрузилась — проверьте, что в сборке " +
+                    "есть net.java.dev.jna:jna в варианте @aar"
+            else -> ""
+        }
+
+        return (if (message != null) "$name: $message" else name) + hint
     }
 
     private fun closeQuietly(any: Any?) {

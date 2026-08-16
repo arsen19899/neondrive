@@ -192,7 +192,21 @@ dependencies {
     // Сама модель языка в APK НЕ входит и входить не может: русская модель
     // весит около 45 МБ. Она кладётся на устройство отдельно, как карта и граф
     // маршрутов, — см. README.
-    implementation("com.alphacephei:vosk-android:0.3.45")
+    // ВАЖНО: строки две, и обе с @aar — иначе голос не заводится на устройстве.
+    //
+    // POM vosk-android объявляет своей зависимостью net.java.dev.jna:jna:4.4.0
+    // в виде ОБЫЧНОГО JAR. На Android этот jar бесполезен: в нём нет
+    // libjnidispatch.so ни под одну ABI, а именно через него JNA дёргает
+    // нативную часть Vosk. Сборка при этом проходит без единого предупреждения,
+    // и всё падает только на живом ГУ, в момент создания org.vosk.Model:
+    // статическая инициализация JNA не находит свою нативную библиотеку.
+    //
+    // Поэтому vosk берём как @aar (Gradle тогда не тянет транзитивный jar), а
+    // JNA подкладываем сами в aar-варианте — в нём .so лежат в jniLibs и
+    // нормально попадают в APK. Ровно так это сделано в официальном демо
+    // vosk-android; версия JNA с версией vosk не связана.
+    implementation("com.alphacephei:vosk-android:0.3.45@aar")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.android.material:material:1.12.0")
