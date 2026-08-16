@@ -40,6 +40,7 @@ import com.neondrive.launcher.ui.theme.neonGlow
 import com.neondrive.launcher.ui.theme.neonPanel
 import com.neondrive.launcher.voice.VoiceAssistant
 import com.neondrive.launcher.voice.VoicePhase
+import com.neondrive.launcher.voice.VoiceTrigger
 import com.neondrive.launcher.voice.WakeWord
 
 /**
@@ -87,7 +88,8 @@ fun BoxScope.VoiceOverlay(accent: Color, accent2: Color) {
                 Column(Modifier.padding(start = 12.dp)) {
                     Text(
                         when (state.phase) {
-                            VoicePhase.LISTENING -> WakeWord.NAME.uppercase() + " СЛУШАЕТ"
+                            VoicePhase.LISTENING ->
+                                WakeWord.NAME.uppercase() + " СЛУШАЕТ" + triggerMark(state.trigger)
                             VoicePhase.WORKING -> "ВЫПОЛНЯЮ"
                             else -> WakeWord.NAME.uppercase()
                         },
@@ -140,6 +142,22 @@ fun BoxScope.VoiceOverlay(accent: Color, accent2: Color) {
             }
         }
     }
+}
+
+/**
+ * Чем начат сеанс — приписка к заголовку плашки.
+ *
+ * Нужна ровно для одного вопроса, на который иначе нельзя ответить, сидя за
+ * рулём: если оболочка открыла микрофон сама, что именно сработало. «ИМЯ» —
+ * распознаватель принял посторонний звук за обращение. «КНОПКА» — руль прислал
+ * нажатие, которого не было: у резистивных кнопок это обычное дело при плохом
+ * контакте, и лечится оно не голосовым управлением, а допуском АЦП в настройках.
+ */
+private fun triggerMark(trigger: VoiceTrigger): String = when (trigger) {
+    VoiceTrigger.BUTTON -> " · КНОПКА"
+    VoiceTrigger.WAKE -> " · ИМЯ"
+    VoiceTrigger.DICTATION -> " · ДИКТОВКА"
+    VoiceTrigger.NONE -> ""
 }
 
 /**

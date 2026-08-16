@@ -52,8 +52,21 @@ enum class VoicePhase {
     REPLY
 }
 
+/**
+ * Кто начал сеанс.
+ *
+ * Не украшение и не отладка: от источника зависит, разговаривает ли оболочка
+ * вслух. Кнопку человек нажал сам и ждёт подтверждения; имя мог услышать
+ * распознаватель, которого никто не звал. Заодно источник видно на плашке —
+ * если оболочка проснулась сама, сразу понятно, что именно сработало:
+ * распознаватель имени или кнопка руля, приславшая нажатие без нажатия.
+ */
+enum class VoiceTrigger { NONE, BUTTON, WAKE, DICTATION }
+
 data class VoiceUiState(
     val phase: VoicePhase = VoicePhase.OFF,
+    /** Чем начат текущий сеанс. */
+    val trigger: VoiceTrigger = VoiceTrigger.NONE,
     /** Что услышали — в том числе промежуточная гипотеза, пока человек говорит. */
     val heard: String = "",
     /** Ответ ассистента. */
@@ -94,7 +107,18 @@ data class VoiceUiState(
  * фразой, и если ждать, пока движок окончательно закроет слово «Елисей» по
  * паузе, начало команды уже прозвучит в пустоту. Переключение занимает доли
  * секунды, и хвост фразы попадает в полную модель. Если всё же не попал —
- * ассистент через пару секунд молчания сам скажет «Слушаю» и подождёт ещё.
+ * ассистент молча ждёт команду ещё несколько секунд, показывая плашку на
+ * экране, и так же молча закрывает микрофон, если ничего не прозвучало.
+ *
+ * ## Почему по имени оболочка ничего не произносит
+ *
+ * Ожидание ключевого слова ошибается — это свойство любого распознавателя с
+ * короткой грамматикой, а не дефект настройки. Вопрос лишь в том, во что
+ * обходится ошибка. Пока на ложное срабатывание оболочка отвечала вслух
+ * «Слушаю», ошибка превращалась в разговор с самим собой, да ещё и
+ * самоподдерживающийся: собственный голос из динамика — идеальный вход для той
+ * же грамматики. Поэтому вслух отвечает только сеанс, начатый кнопкой: там за
+ * микрофоном заведомо стоит человек.
  *
  * ## Почему ожидание выключено по умолчанию
  *
@@ -110,11 +134,29 @@ data class VoiceUiState(
  */
 object VoiceAssistant {
 
-    /** Через сколько молчания подсказать голосом, что ждём команду. */
-    private const val PROMPT_AFTER_MS = 2200L
-
     /** Сколько всего ждать команду, прежде чем сдаться и вернуться к ожиданию. */
     private const val COMMAND_TIMEOUT_MS = 9000L
+
+    /**
+     * Сколько игнорировать микрофон, пока оболочка говорит сама, и ещё после.
+     *
+     * Динамики и микрофон живут в одном салоне: всё, что произносит синтез,
+     * возвращается в распознаватель. Для короткой грамматики ожидания это
+     * худший из возможных входных сигналов — чистая громкая речь, которую не
+     * на что разложить, кроме имени.
+     */
+    private const val SELF_SPEECH_GUARD_MS = 900L
+
+    /**
+     * Пауза в ожидании после пробуждения, которое ничем не кончилось.
+     *
+     * Ложное срабатывание почти никогда не бывает одиночным: тот же самый звук
+     * (проезжающая фура, вокал в припеве) держится секундами и будит оболочку
+     * подряд. Короткая пауза разрывает эту очередь, ничего не стоя настоящему
+     * обращению — человек, сказавший «Елисей» и передумавший, не повторяет имя
+     * через полсекунды.
+     */
+    private const val WAKE_COOLDOWN_MS = 2500L
 
     /**
      * Сколько ждать, пока движок откроет микрофон.
@@ -155,6 +197,24 @@ object VoiceAssistant {
 
     /** Идёт сеанс команды — чтобы поздние колбэки старого движка не путались под ногами. */
     private var commandSession = 0
+
+    /** До этого момента обращение по имени не принимается. См. [WAKE_COOLDOWN_MS]. */
+    private var wakeBlockedUntil = 0L
+
+    /**
+     * В микрофон попал собственный голос оболочки — текущую фразу принимать нельзя.
+     *
+     * Гипотеза распознавателя накапливается до конца фразы, а не пересчитывается
+     * с нуля на каждом куске звука. Поэтому мало промолчать, пока играет синтез:
+     * имя, послышавшееся движку в нашем же «Слушаю», останется в гипотезе и
+     * всплывёт через секунду после того, как оболочка замолчала. Отсюда флаг и
+     * перезапуск ожидания: услышанное за время собственной речи выбрасывается
+     * вместе с распознавателем.
+     */
+    private var wakeTainted = false
+
+    /** Перезапуск ожидания уже назначен — второй не нужен. */
+    private var wakeRestartPending = false
 
     /**
      * Куда отдать распознанный текст, если идёт диктовка, а не команда.
@@ -240,10 +300,12 @@ object VoiceAssistant {
             return
         }
 
+        wakeTainted = false
+
         VoskEngine.start(
             context = ctx,
             purpose = ListenPurpose.WAKE_WORD,
-            onResult = { r -> if (containsWakeWord(r.text)) onWakeWord() },
+            onResult = { r -> onWakeHypothesis(r) },
             onError = { msg ->
                 // Ошибка ожидания — не повод шуметь: чаще всего это занятый
                 // микрофон. Просто гасим состояние, следующий заход произойдёт
@@ -268,15 +330,85 @@ object VoiceAssistant {
         }
     }
 
+    /**
+     * Гипотеза режима ожидания. Единственная дверь, через которую оболочка
+     * просыпается по имени, поэтому все проверки собраны здесь.
+     *
+     * Распознаватель ожидания знает шесть слов и «[unk]», и любой достаточно
+     * речеподобный звук он обязан на что-то разложить. Совсем избавиться от
+     * ошибок нельзя — можно убрать те их причины, которые создаёт сама
+     * оболочка, и не дать одной ошибке превратиться в очередь.
+     */
+    private fun onWakeHypothesis(r: SpeechResult) {
+        // 1. Оболочка говорит сама. Собственный голос — самый громкий и самый
+        //    чистый звук, который слышит микрофон, и именно он замыкал круг
+        //    «сказали „Слушаю“ — услышали в этом имя — проснулись снова».
+        if (GuidanceEngine.isSpeaking(graceMs = SELF_SPEECH_GUARD_MS)) {
+            wakeTainted = true
+            return
+        }
+
+        // 2. Мы только что говорили, и в текущей гипотезе может лежать наш
+        //    собственный голос. Выбрасываем её целиком вместе с распознавателем.
+        if (wakeTainted) {
+            restartWakeAfterOwnSpeech()
+            return
+        }
+
+        // 3. Сеанс уже идёт (слушаем команду, выполняем, отвечаем) — будить
+        //    нечего, а поздний колбэк старого движка только собьёт состояние.
+        val phase = _state.value.phase
+        if (phase != VoicePhase.WAITING && phase != VoicePhase.OFF) return
+
+        // 4. Пауза после предыдущего пробуждения впустую.
+        if (System.currentTimeMillis() < wakeBlockedUntil) return
+
+        if (!containsWakeWord(r.text)) return
+        onWakeWord()
+    }
+
+    /**
+     * Перезапустить ожидание, забыв всё, что слышал микрофон, пока говорила
+     * оболочка.
+     *
+     * Именно перезапуск, а не таймер: у распознавателя нет способа «забыть
+     * последние две секунды», зато новый распознаватель начинает с чистого
+     * листа. Платим одним пересозданием на каждую произнесённую фразу — модель
+     * при этом уже в памяти, пересоздаётся только сам распознаватель.
+     *
+     * Небольшая задержка перед этим нужна, чтобы не трогать движок из его же
+     * колбэка, и заодно даёт хвосту фразы доиграть.
+     */
+    private fun restartWakeAfterOwnSpeech() {
+        if (wakeRestartPending) return
+        wakeRestartPending = true
+        scope.launch {
+            delay(150)
+            wakeRestartPending = false
+            wakeTainted = false
+            if (_state.value.phase != VoicePhase.WAITING) return@launch
+            VoskEngine.stop()
+            startWakeListening()
+        }
+    }
+
+    /**
+     * Строгое сравнение, а не [WakeWord.matches].
+     *
+     * Мягкое сравнение с расстоянием Левенштейна нужно внутри уже начатой
+     * команды, где текст пришёл от полной модели языка. Здесь текст приходит от
+     * грамматики, которая и так не умеет выдать ничего постороннего, поэтому
+     * допуск на ошибку только расширял бы список звуков, принимаемых за имя.
+     */
     private fun containsWakeWord(text: String): Boolean =
-        RussianText.words(text).any { WakeWord.matches(it) }
+        RussianText.words(text).any { WakeWord.matchesStrict(it) }
 
     private fun onWakeWord() {
         val ctx = appContext ?: return
         if (_state.value.phase == VoicePhase.LISTENING) return
         dictationTarget = null
         VoskEngine.stop()
-        beginCommand(ctx, announce = false)
+        beginCommand(ctx, VoiceTrigger.WAKE)
     }
 
     /** Кнопка руля «Голосовой помощник» и кнопка микрофона в поиске адреса. */
@@ -297,7 +429,7 @@ object VoiceAssistant {
         }
         dictationTarget = null
         VoskEngine.stop()
-        beginCommand(ctx, announce = true)
+        beginCommand(ctx, VoiceTrigger.BUTTON)
     }
 
     /**
@@ -317,17 +449,22 @@ object VoiceAssistant {
 
         dictationTarget = onText
         VoskEngine.stop()
-        beginCommand(ctx, announce = false)
+        beginCommand(ctx, VoiceTrigger.DICTATION)
     }
 
     /* ─────────────────  ПРОСЛУШИВАНИЕ КОМАНДЫ  ───────────────── */
 
     /**
-     * [announce] — сказать «Слушаю» сразу. Так делается по кнопке: человек нажал
-     * и ждёт подтверждения. По ключевому слову — наоборот, молчим: команда,
-     * скорее всего, уже произносится, и подсказка перебила бы её.
+     * [trigger] — кто начал сеанс, и от этого зависит, звучит ли хоть что-нибудь.
+     *
+     * По кнопке оболочка говорит «Слушаю» сразу: человек нажал и ждёт ответа.
+     * По имени она молчит от начала и до конца сеанса — даже если ничего не
+     * расслышала. Дело не в экономии слов: ожидание ключевого слова ошибается,
+     * и каждое сказанное вслух «Слушаю» после ложного срабатывания и есть та
+     * самая жалоба «помощник просыпается сам и спрашивает». Молчаливое ложное
+     * срабатывание не замечает никто: на экране мигнёт плашка, и всё.
      */
-    private fun beginCommand(ctx: Context, announce: Boolean) {
+    private fun beginCommand(ctx: Context, trigger: VoiceTrigger) {
         commandJob?.cancel()
         replyJob?.cancel()
         workJob?.cancel()
@@ -345,13 +482,15 @@ object VoiceAssistant {
         // в закрытый микрофон и считает, что его не слышат.
         _state.value = _state.value.copy(
             phase = VoicePhase.WORKING,
+            trigger = trigger,
             heard = "",
             reply = "Готовлю распознавание…",
             error = "",
             engineLabel = if (engine === VoskEngine) "Офлайн (Vosk)" else "Системный"
         )
 
-        if (announce) GuidanceEngine.speakAssistant(ctx, "Слушаю")
+        // Вслух — только по кнопке, см. пояснение к [trigger] выше.
+        if (trigger == VoiceTrigger.BUTTON) GuidanceEngine.speakAssistant(ctx, "Слушаю")
 
         // Сторожевой таймер на саму подготовку. Без него сбой, при котором
         // движок не позвал ни onReady, ни onError, оставлял бы оболочку в
@@ -390,16 +529,12 @@ object VoiceAssistant {
                 // момента микрофона просто не было.
                 commandJob?.cancel()
                 commandJob = scope.launch {
-                    delay(PROMPT_AFTER_MS)
-                    if (session == commandSession &&
-                        _state.value.phase == VoicePhase.LISTENING &&
-                        _state.value.heard.isBlank() &&
-                        !announce &&
-                        dictationTarget == null
-                    ) {
-                        GuidanceEngine.speakAssistant(ctx, "Слушаю")
-                    }
-                    delay(COMMAND_TIMEOUT_MS - PROMPT_AFTER_MS)
+                    // Здесь была подсказка голосом: через две секунды молчания
+                    // оболочка сама произносила «Слушаю». Убрана намеренно —
+                    // именно она превращала каждое ложное срабатывание ожидания
+                    // в разговор оболочки с самой собой. Плашка на экране и
+                    // тайм-аут делают ту же работу, никого не пугая.
+                    delay(COMMAND_TIMEOUT_MS)
                     if (session == commandSession &&
                         _state.value.phase == VoicePhase.LISTENING
                     ) {
@@ -437,8 +572,10 @@ object VoiceAssistant {
         val command = CommandParser.parse(body, settings.navFavorites.map { it.name })
 
         if (command is VoiceCommand.Empty) {
-            // Позвали, но не попросили. Не ответ, а продолжение ожидания.
-            beginCommand(ctx, announce = true)
+            // Позвали, но не попросили. Не ответ, а продолжение ожидания —
+            // и продолжение ровно с той же громкостью, с какой сеанс начался:
+            // по кнопке переспрашиваем вслух, по имени слушаем дальше молча.
+            beginCommand(ctx, _state.value.trigger)
             return
         }
 
@@ -467,8 +604,16 @@ object VoiceAssistant {
             return
         }
 
+        // Сеанс, начатый именем и ничем не кончившийся, — почти наверняка
+        // ложное срабатывание. Держим паузу, прежде чем принимать имя снова:
+        // без неё один и тот же посторонний звук будит оболочку подряд.
+        if (_state.value.trigger == VoiceTrigger.WAKE) {
+            wakeBlockedUntil = System.currentTimeMillis() + WAKE_COOLDOWN_MS
+        }
+
         _state.value = _state.value.copy(
             phase = VoicePhase.OFF,
+            trigger = VoiceTrigger.NONE,
             heard = "",
             reply = "",
             error = reason.takeIf { it.isNotBlank() && it != "Тишина" && it != "Не расслышал" }
@@ -492,7 +637,12 @@ object VoiceAssistant {
         replyJob?.cancel()
         replyJob = scope.launch {
             delay(REPLY_HOLD_MS)
-            _state.value = _state.value.copy(phase = VoicePhase.OFF, heard = "", reply = "")
+            _state.value = _state.value.copy(
+                phase = VoicePhase.OFF,
+                trigger = VoiceTrigger.NONE,
+                heard = "",
+                reply = ""
+            )
             if (wakeWanted()) startWakeListening()
         }
     }

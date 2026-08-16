@@ -575,19 +575,24 @@ object GuidanceEngine {
         runCatching {
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    // Ничего: фокус уже взят перед вызовом speak.
+                    // Ничего: фокус уже взят перед вызовом speak, а признак
+                    // «оболочка говорит» выставлен там же — раньше, чем движок
+                    // доберётся до этого колбэка.
                 }
 
                 override fun onDone(utteranceId: String?) {
+                    markSpeechFinished()
                     abandonFocus()
                 }
 
                 @Deprecated("Абстрактный метод базового класса, помечен устаревшим в Android")
                 override fun onError(utteranceId: String?) {
+                    markSpeechFinished()
                     abandonFocus()
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
+                    markSpeechFinished()
                     abandonFocus()
                 }
             })
@@ -630,9 +635,66 @@ object GuidanceEngine {
         if (ttsReady) emit(text, force = true) else pendingAssistant = text
     }
 
+    /* ─────────────────  «СЕЙЧАС ГОВОРИМ»  ───────────────── */
+
+    /**
+     * Когда началась текущая фраза и когда закончилась последняя.
+     *
+     * Нужно не синтезу, а голосовому управлению. Микрофон ГУ стоит в одном
+     * салоне с динамиками, и при открытом ожидании ключевого слова
+     * распознаватель отлично слышит собственный голос оболочки. Грамматика
+     * ожидания короткая — шесть вариантов имени плюс «[unk]», — и чистая
+     * громкая речь из динамика ложится на неё охотнее любого другого звука.
+     * Получался замкнутый круг: сказали «Слушаю» — услышали в этом «Елисей» —
+     * снова проснулись — снова сказали «Слушаю». Снаружи это ровно то, на что
+     * жалуются: помощник просыпается сам.
+     */
+    @Volatile
+    private var speakingUntil = 0L
+
+    @Volatile
+    private var speechEndedAt = 0L
+
+    /**
+     * Оценка длительности фразы сверху, по числу букв.
+     *
+     * Нужна не для точности, а как страховка: сигнал «договорил» приходит от
+     * движка синтеза (`onDone`), и на части прошивок ГУ он не приходит вовсе.
+     * Опираться на один лишь колбэк нельзя — при его потере голосовое
+     * управление осталось бы глухим до конца поездки. Оценка ошибается в
+     * большую сторону на доли секунды, и это ровно та ошибка, которая не мешает.
+     */
+    private fun estimateSpeechMs(text: String): Long =
+        (700L + 85L * text.length).coerceAtMost(15_000L)
+
+    /**
+     * Говорит ли оболочка прямо сейчас — или говорила меньше [graceMs] назад.
+     *
+     * Запас после окончания обязателен: динамик доигрывает хвост фразы, а
+     * микрофон отдаёт звук с задержкой в сотню-другую миллисекунд. Без запаса
+     * последнее слово собственной фразы всё равно попадало бы в распознаватель.
+     */
+    fun isSpeaking(graceMs: Long = 0L): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < speakingUntil) return true
+        return graceMs > 0L && now - speechEndedAt < graceMs
+    }
+
+    private fun markSpeechFinished() {
+        speakingUntil = 0L
+        speechEndedAt = System.currentTimeMillis()
+    }
+
     private fun emit(text: String, force: Boolean = false) {
         if (!ttsReady || text.isBlank()) return
         requestFocus()
+        // Отмечаем «говорим» ДО вызова speak, а не в onStart: между вызовом и
+        // реальным началом синтеза проходит заметное время, и ожидание
+        // ключевого слова не должно успеть поймать начало собственной фразы.
+        // Очередь (QUEUE_ADD) сама себя продлевает — каждая следующая фраза
+        // сдвигает срок вперёд.
+        val estimatedEnd = System.currentTimeMillis() + estimateSpeechMs(text)
+        if (estimatedEnd > speakingUntil) speakingUntil = estimatedEnd
         runCatching {
             val params = Bundle().apply {
                 // Громкость подсказки задаётся здесь, а не системным ползунком:
@@ -647,7 +709,7 @@ object GuidanceEngine {
                 params,
                 UTTERANCE_ID
             )
-        }.onFailure { abandonFocus() }
+        }.onFailure { markSpeechFinished(); abandonFocus() }
     }
 
     /* ─────────────────  АУДИОФОКУС  ───────────────── */
